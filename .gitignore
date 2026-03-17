@@ -1,0 +1,35 @@
+# Environment and secrets
+.env
+
+# Runtime data (personal financial data, sessions, alerts)
+data/
+
+# Memory stores
+memory/memory.jsonl
+memory/chroma_db/
+
+# Virtual environment
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Logs
+*.log
+gui_log.txt
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
