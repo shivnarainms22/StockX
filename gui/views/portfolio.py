@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QFrame, QHBoxLayout, QLabel,
+    QDialog, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QScrollArea, QSizePolicy,
     QVBoxLayout, QWidget,
 )
@@ -35,7 +35,6 @@ class PortfolioView(QWidget):
         self._prices:     dict[str, float] = {}
         self._currencies: dict[str, str]   = {}
         self._dividends:  dict[str, float] = {}   # item 12: ticker → annual div per share
-        self._chart_mode: str = "value"            # item 10: "value" | "pnl" | "comparison"
         self._setup_ui()
         self._state.load_portfolio_snapshots()
         self._update_summary()
@@ -63,54 +62,28 @@ class PortfolioView(QWidget):
         body_layout.setContentsMargins(32, 16, 32, 16)
         body_layout.setSpacing(16)
 
-        # Chart controls row (items 10 & 11)
-        chart_ctrl = QWidget()
-        chart_ctrl.setStyleSheet("background: transparent;")
-        ctrl_h = QHBoxLayout(chart_ctrl)
-        ctrl_h.setContentsMargins(0, 0, 0, 4)
-        ctrl_h.setSpacing(8)
+        # Chart section — only visible when there are 2+ daily snapshots
+        self._chart_section = QWidget()
+        self._chart_section.setStyleSheet("background: transparent;")
+        chart_v = QVBoxLayout(self._chart_section)
+        chart_v.setContentsMargins(0, 0, 0, 0)
+        chart_v.setSpacing(8)
 
-        self._chart_value_btn = QPushButton("Value")
-        self._chart_value_btn.setObjectName("Chip")
-        self._chart_value_btn.setFixedHeight(26)
-        self._chart_value_btn.clicked.connect(lambda: self._set_chart_mode("value"))
+        chart_title = QLabel("Performance")
+        chart_title.setStyleSheet(f"color: {TEXT_2}; font-size: 12px; font-weight: 600; letter-spacing: 1px; background: transparent;")
+        chart_v.addWidget(chart_title)
 
-        self._chart_pnl_btn = QPushButton("Returns %")
-        self._chart_pnl_btn.setObjectName("Chip")
-        self._chart_pnl_btn.setFixedHeight(26)
-        self._chart_pnl_btn.clicked.connect(lambda: self._set_chart_mode("pnl"))
-
-        self._chart_cmp_btn = QPushButton("vs Benchmark")
-        self._chart_cmp_btn.setObjectName("Chip")
-        self._chart_cmp_btn.setFixedHeight(26)
-        self._chart_cmp_btn.clicked.connect(lambda: self._set_chart_mode("comparison"))
-
-        self._benchmark_dd = QComboBox()
-        for label, sym in [("S&P 500", "SPY"), ("NASDAQ", "QQQ"), ("Nifty 50", "^NSEI"),
-                            ("FTSE 100", "^FTSE"), ("DAX", "^GDAXI"), ("None", "")]:
-            self._benchmark_dd.addItem(label, sym)
-        self._benchmark_dd.currentIndexChanged.connect(lambda _: self._update_chart())
-        self._benchmark_dd.setFixedHeight(28)
-        self._benchmark_dd.setVisible(False)
-
-        ctrl_h.addWidget(self._chart_value_btn)
-        ctrl_h.addWidget(self._chart_pnl_btn)
-        ctrl_h.addWidget(self._chart_cmp_btn)
-        ctrl_h.addWidget(self._benchmark_dd)
-        ctrl_h.addStretch()
-        body_layout.addWidget(chart_ctrl)
-
-        # Chart label
+        # Chart image
         self._chart_label = QLabel()
         self._chart_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._chart_label.setScaledContents(False)
         self._chart_label.setFixedHeight(180)
         self._chart_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self._chart_label.setStyleSheet(
-            f"background-color: {SURFACE_2}; border: none; border-radius: 14px;"
-        )
-        self._chart_label.setVisible(False)
-        body_layout.addWidget(self._chart_label)
+        self._chart_label.setStyleSheet("background: transparent;")
+        chart_v.addWidget(self._chart_label)
+
+        self._chart_section.setVisible(False)
+        body_layout.addWidget(self._chart_section)
 
         # List rows (replace QTableWidget)
         self._rows_widget = QWidget()
@@ -316,24 +289,10 @@ class PortfolioView(QWidget):
         qty_lbl = QLabel(f"{qty:g} shares")
         qty_lbl.setStyleSheet(f"color: {TEXT_2}; font-size: 12px; background: transparent; min-width: 70px;")
 
-        # Price
-        price_lbl = QLabel(fmt_price(price, code))
-        price_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 14px; font-weight: 600; background: transparent;")
-        price_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
-
         # Value
         val_lbl = QLabel(fmt_price(value, code))
         val_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 14px; font-weight: 600; background: transparent;")
         val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
-
-        # P&L
-        pnl_lbl = QLabel(f"{sign}{fmt_price(pnl, code)}")
-        pnl_lbl.setStyleSheet(f"color: {pnl_color}; font-size: 13px; font-weight: 600; background: transparent;")
-        pnl_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
-
-        pnl_pct_lbl = QLabel(f"{sign}{pnl_pct:.1f}%")
-        pnl_pct_lbl.setStyleSheet(f"color: {pnl_color}; font-size: 12px; background: transparent; min-width: 50px;")
-        pnl_pct_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
 
         # Delete
         del_btn = QPushButton("\u2715")
@@ -344,13 +303,32 @@ class PortfolioView(QWidget):
         del_btn.setFixedSize(28, 28)
         del_btn.clicked.connect(lambda _=False, t=ticker: self._remove_holding(t))
 
+        # Value column (labeled)
+        val_col = QVBoxLayout()
+        val_col.setSpacing(0)
+        val_head = QLabel("Value")
+        val_head.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent;")
+        val_head.setAlignment(Qt.AlignmentFlag.AlignRight)
+        val_col.addWidget(val_head)
+        val_col.addWidget(val_lbl)
+
+        # P&L column (labeled)
+        pnl_col = QVBoxLayout()
+        pnl_col.setSpacing(0)
+        pnl_head = QLabel("P&L")
+        pnl_head.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent;")
+        pnl_head.setAlignment(Qt.AlignmentFlag.AlignRight)
+        pnl_combined = QLabel(f"{sign}{fmt_price(pnl, code)}  ({sign}{pnl_pct:.1f}%)")
+        pnl_combined.setStyleSheet(f"color: {pnl_color}; font-size: 13px; font-weight: 600; background: transparent;")
+        pnl_combined.setAlignment(Qt.AlignmentFlag.AlignRight)
+        pnl_col.addWidget(pnl_head)
+        pnl_col.addWidget(pnl_combined)
+
         h.addWidget(ticker_lbl)
         h.addWidget(qty_lbl)
         h.addStretch()
-        h.addWidget(price_lbl)
-        h.addWidget(val_lbl)
-        h.addWidget(pnl_lbl)
-        h.addWidget(pnl_pct_lbl)
+        h.addLayout(val_col)
+        h.addLayout(pnl_col)
         h.addWidget(del_btn)
 
         return row
@@ -374,43 +352,21 @@ class PortfolioView(QWidget):
         self._update_summary()
         self._build_rows()
 
-    def _set_chart_mode(self, mode: str) -> None:
-        """Switch chart between value / P&L% / comparison modes (items 10, 11)."""
-        self._chart_mode = mode
-        self._benchmark_dd.setVisible(mode == "comparison")
-        self._update_chart()
-
     def _update_chart(self) -> None:
         snaps = self._state.portfolio_snapshots
         if len(snaps) < 2:
-            self._chart_label.setVisible(False)
+            self._chart_section.setVisible(False)
             return
+        self._chart_section.setVisible(True)
         try:
-            if self._chart_mode == "pnl":
-                from services.charting import render_pnl_chart
-                png_bytes = render_pnl_chart(snaps)
-            elif self._chart_mode == "comparison":
-                bm_sym = self._benchmark_dd.currentData() or "SPY"
-                if not bm_sym:
-                    from services.charting import render_portfolio_chart
-                    png_bytes = render_portfolio_chart(snaps)
-                else:
-                    from services.charting import render_comparison_chart
-                    loop = asyncio.get_event_loop()
-                    png_bytes = loop.run_in_executor(None, render_comparison_chart, snaps, bm_sym)
-                    # run_in_executor returns a Future; schedule and bail — chart updates on next call
-                    asyncio.ensure_future(self._async_update_comparison(snaps, bm_sym))
-                    return
-            else:
-                from services.charting import render_portfolio_chart
-                png_bytes = render_portfolio_chart(snaps)
+            from services.charting import render_portfolio_chart
+            png_bytes = render_portfolio_chart(snaps)
 
             if png_bytes:
                 img    = QImage.fromData(bytes(png_bytes))
                 pixmap = QPixmap.fromImage(img)
-                scaled = pixmap.scaledToWidth(
-                    max(self._chart_label.width(), 600),
-                    Qt.TransformationMode.SmoothTransformation,
+                scaled = pixmap.scaledToHeight(
+                    180, Qt.TransformationMode.SmoothTransformation,
                 )
                 self._chart_label.setPixmap(scaled)
                 self._chart_label.setVisible(True)
@@ -418,25 +374,6 @@ class PortfolioView(QWidget):
                 self._chart_label.setVisible(False)
         except Exception:
             self._chart_label.setVisible(False)
-
-    async def _async_update_comparison(self, snaps: list, bm_sym: str) -> None:
-        """Fetch benchmark data in executor and update chart (item 11)."""
-        try:
-            from services.charting import render_comparison_chart
-            png_bytes = await asyncio.get_event_loop().run_in_executor(
-                None, render_comparison_chart, snaps, bm_sym
-            )
-            if png_bytes:
-                img    = QImage.fromData(bytes(png_bytes))
-                pixmap = QPixmap.fromImage(img)
-                scaled = pixmap.scaledToWidth(
-                    max(self._chart_label.width(), 600),
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                self._chart_label.setPixmap(scaled)
-                self._chart_label.setVisible(True)
-        except Exception:
-            pass
 
     # ── Refresh ───────────────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtGui import QImage, QPixmap  # kept for potential future use
 from PyQt6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QScrollArea,
@@ -33,7 +33,6 @@ class WatchlistView(QWidget):
         self._state = state
         self._mw    = main_window
         self._live: dict[str, dict] = {}
-        self._sparklines: dict[str, bytes] = {}   # item 7
         self._alert_panel_visible = False
         self._setup_ui()
         self._build_rows()
@@ -217,23 +216,26 @@ class WatchlistView(QWidget):
         ticker_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 14px; font-weight: 600; background: transparent;")
         info.addWidget(ticker_lbl)
 
-        # Sparkline
-        spark_lbl = QLabel()
-        spark_lbl.setFixedSize(80, 32)
-        spark_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        spark_bytes = self._sparklines.get(ticker, b"")
-        if spark_bytes:
-            img = QImage.fromData(bytes(spark_bytes))
-            spark_lbl.setPixmap(QPixmap.fromImage(img))
-        spark_lbl.setStyleSheet("background: transparent;")
+        # Price + change
+        change_val = live.get("change_pct")
+        if change_val is not None:
+            chg_sign = "+" if change_val >= 0 else ""
+            chg_color = POSITIVE if change_val >= 0 else NEGATIVE
+            chg_str = f"{chg_sign}{change_val:.2f}%"
+        else:
+            chg_color = TEXT_MUTED
+            chg_str = ""
 
-        # Price
         price_col = QVBoxLayout()
         price_col.setSpacing(1)
         price_lbl = QLabel(price_str)
         price_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 15px; font-weight: 600; background: transparent;")
         price_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+        chg_lbl = QLabel(chg_str)
+        chg_lbl.setStyleSheet(f"color: {chg_color}; font-size: 12px; font-weight: 500; background: transparent;")
+        chg_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         price_col.addWidget(price_lbl)
+        price_col.addWidget(chg_lbl)
 
         # RSI
         rsi_frame = QVBoxLayout()
@@ -271,7 +273,6 @@ class WatchlistView(QWidget):
 
         h.addWidget(avatar)
         h.addLayout(info, stretch=1)
-        h.addWidget(spark_lbl)
         h.addLayout(price_col)
         h.addWidget(rsi_widget)
         h.addWidget(edit_btn)
@@ -422,7 +423,6 @@ class WatchlistView(QWidget):
 
     async def refresh(self, _e=None) -> None:
         import yfinance as yf
-        from services.charting import render_sparkline
         self._refresh_btn.setEnabled(False)
         tickers = [item["ticker"] for item in self._state.watchlist]
 
@@ -447,16 +447,15 @@ class WatchlistView(QWidget):
                 gains  = delta.clip(lower=0).rolling(14).mean()
                 losses = (-delta.clip(upper=0)).rolling(14).mean()
                 rsi    = float((100 - 100 / (1 + gains / losses)).iloc[-1])
-                self._live[ticker] = {"price": price, "rsi": rsi, "currency": currency}
 
-                # Generate 7-day sparkline (item 7)
-                prices_7d = list(hist["Close"].tail(7))
-                if len(prices_7d) >= 2:
-                    up = prices_7d[-1] >= prices_7d[0]
-                    spark = await asyncio.get_event_loop().run_in_executor(
-                        None, render_sparkline, prices_7d, up
-                    )
-                    self._sparklines[ticker] = spark
+                # 1-day change %
+                prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price
+                change_pct = ((price - prev) / prev * 100) if prev else 0.0
+
+                self._live[ticker] = {
+                    "price": price, "rsi": rsi, "currency": currency,
+                    "change_pct": change_pct,
+                }
             except Exception:
                 pass
 

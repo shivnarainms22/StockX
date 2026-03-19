@@ -176,20 +176,32 @@ class AnalysisView(QWidget):
 
         self._provider_label = QLabel(self._state.detect_provider())
         self._provider_label.setStyleSheet(
-            f"font-size: 11px; color: {ACCENT_CYAN}; background-color: {SURFACE_2};"
-            f"border-radius: 10px; padding: 2px 8px;"
+            f"font-size: 11px; color: {TEXT_MUTED}; background: transparent;"
         )
 
-        self._export_btn = _icon_btn("⬇", "Export as Markdown")
+        def _header_pill(text: str) -> QPushButton:
+            b = QPushButton(text)
+            b.setFixedHeight(28)
+            b.setStyleSheet(
+                f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none;"
+                f"border-radius: 8px; padding: 4px 14px; font-size: 12px; }}"
+                f"QPushButton:hover {{ background: {SURFACE_1}; color: {TEXT_1}; }}"
+            )
+            return b
+
+        self._export_btn = _header_pill("Export")
         self._export_btn.clicked.connect(self._export_chat)
-        self._pdf_btn = _icon_btn("📄", "Export as PDF")
+        self._pdf_btn = _header_pill("PDF")
         self._pdf_btn.clicked.connect(self._export_pdf)
-        self._history_btn = _icon_btn("📋", "Analysis history")
+        self._history_btn = _header_pill("History")
         self._history_btn.clicked.connect(self._toggle_history)
 
-        self._clear_btn = QPushButton("Clear")
-        self._clear_btn.setObjectName("DangerBtn")
-        self._clear_btn.setFixedHeight(28)
+        self._clear_btn = _header_pill("Clear")
+        self._clear_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: none;"
+            f"border-radius: 8px; padding: 4px 14px; font-size: 12px; }}"
+            f"QPushButton:hover {{ color: {NEGATIVE}; background: rgba(251,113,133,0.08); }}"
+        )
         self._clear_btn.clicked.connect(self._clear_chat)
 
         for w in [self._provider_label, self._export_btn, self._pdf_btn,

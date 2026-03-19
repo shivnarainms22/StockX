@@ -10,31 +10,34 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
-APP_BG    = "#0C0C0E"
 ACCENT    = "#D4A843"
 ACCENT_CYAN = "#BFA76E"
 TEXT_2    = "#87878F"
-SURFACE_2 = "#1A1A1D"
+TEXT_MUTED = "#4A4A52"
 POSITIVE  = "#34D399"
 NEGATIVE  = "#FB7185"
 
 
+def _setup_axes(ax) -> None:
+    """Shared minimal axes styling for all charts."""
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.tick_params(colors=TEXT_2, labelsize=8, length=0)
+    ax.yaxis.tick_right()
+    ax.yaxis.set_label_position("right")
+    ax.yaxis.grid(True, color=(1, 1, 1, 0.06), linewidth=0.5)
+    ax.set_axisbelow(True)
+    ax.xaxis.grid(False)
+
+
 def render_portfolio_chart(snapshots: list[dict]) -> bytes:
-    """
-    Render a line chart of portfolio value over time.
-
-    Args:
-        snapshots: list of {"date": "YYYY-MM-DD", "value": float, "currency": str}
-
-    Returns:
-        PNG image bytes. Returns empty bytes on error.
-    """
+    """Render a line chart of portfolio value over time."""
     if len(snapshots) < 2:
         return b""
 
     try:
         import matplotlib
-        matplotlib.use("Agg")  # non-interactive backend — must be before pyplot import
+        matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import matplotlib.dates as mdates
         from datetime import datetime
@@ -42,29 +45,16 @@ def render_portfolio_chart(snapshots: list[dict]) -> bytes:
         dates = [datetime.strptime(s["date"], "%Y-%m-%d") for s in snapshots]
         values = [s["value"] for s in snapshots]
 
-        fig, ax = plt.subplots(figsize=(8, 2.4), dpi=110)
-        fig.patch.set_facecolor(APP_BG)
-        ax.set_facecolor(SURFACE_2)
+        fig, ax = plt.subplots(figsize=(8, 1.8), dpi=110)
+        fig.patch.set_facecolor("none")
+        ax.set_facecolor("none")
 
-        # Fill area under the line
-        ax.fill_between(dates, values, alpha=0.18, color=ACCENT)
-        ax.plot(dates, values, color=ACCENT, linewidth=2, solid_capstyle="round")
+        ax.plot(dates, values, color=ACCENT, linewidth=1.8, solid_capstyle="round")
 
-        # Axes styling
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
+        _setup_axes(ax)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-        ax.tick_params(colors=TEXT_2, labelsize=9)
-        for spine in ax.spines.values():
-            spine.set_edgecolor("#1E1E22")
-        ax.yaxis.tick_right()
-        ax.yaxis.set_label_position("right")
 
-        # Grid
-        ax.yaxis.grid(True, color="#1E1E22", linewidth=0.6, linestyle="--")
-        ax.set_axisbelow(True)
-        ax.xaxis.grid(False)
-
-        # Currency label on rightmost tick
         currency = snapshots[-1].get("currency", "USD")
         sym_map = {"USD": "$", "GBP": "£", "EUR": "€", "JPY": "¥", "CAD": "CA$"}
         sym = sym_map.get(currency, f"{currency} ")
@@ -73,10 +63,10 @@ def render_portfolio_chart(snapshots: list[dict]) -> bytes:
         )
 
         fig.autofmt_xdate(rotation=0, ha="center")
-        plt.tight_layout(pad=0.5)
+        plt.tight_layout(pad=0.3)
 
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", facecolor=APP_BG, bbox_inches="tight")
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight")
         plt.close(fig)
         buf.seek(0)
         return buf.read()
@@ -86,10 +76,7 @@ def render_portfolio_chart(snapshots: list[dict]) -> bytes:
 
 
 def render_sparkline(prices: list[float], up: bool = True) -> bytes:
-    """
-    Render a tiny 7-bar sparkline (item 7).
-    Returns PNG bytes at 1.5×0.4 inches / 100 DPI.
-    """
+    """Render a tiny sparkline. Returns PNG bytes."""
     if len(prices) < 2:
         return b""
     try:
@@ -104,7 +91,6 @@ def render_sparkline(prices: list[float], up: bool = True) -> bytes:
 
         x = list(range(len(prices)))
         ax.plot(x, prices, color=color, linewidth=1.5, solid_capstyle="round")
-        ax.fill_between(x, prices, alpha=0.20, color=color)
         ax.axis("off")
         plt.tight_layout(pad=0)
 
@@ -118,10 +104,7 @@ def render_sparkline(prices: list[float], up: bool = True) -> bytes:
 
 
 def render_pnl_chart(snapshots: list[dict]) -> bytes:
-    """
-    Render a % return chart normalised to first snapshot value (item 10).
-    Returns PNG bytes.
-    """
+    """Render a % return chart normalised to first snapshot value."""
     if len(snapshots) < 2:
         return b""
     try:
@@ -138,31 +121,23 @@ def render_pnl_chart(snapshots: list[dict]) -> bytes:
 
         up_color = POSITIVE if pcts[-1] >= 0 else NEGATIVE
 
-        fig, ax = plt.subplots(figsize=(8, 2.4), dpi=110)
-        fig.patch.set_facecolor(APP_BG)
-        ax.set_facecolor(SURFACE_2)
+        fig, ax = plt.subplots(figsize=(8, 1.8), dpi=110)
+        fig.patch.set_facecolor("none")
+        ax.set_facecolor("none")
 
-        ax.axhline(0, color="#1E1E22", linewidth=1, linestyle="--")
-        ax.fill_between(dates, pcts, alpha=0.18, color=up_color)
-        ax.plot(dates, pcts, color=up_color, linewidth=2, solid_capstyle="round")
+        ax.axhline(0, color=TEXT_MUTED, linewidth=0.5, alpha=0.4)
+        ax.plot(dates, pcts, color=up_color, linewidth=1.8, solid_capstyle="round")
 
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
+        _setup_axes(ax)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-        ax.tick_params(colors=TEXT_2, labelsize=9)
-        for spine in ax.spines.values():
-            spine.set_edgecolor("#1E1E22")
-        ax.yaxis.tick_right()
-        ax.yaxis.set_label_position("right")
-        ax.yaxis.grid(True, color="#1E1E22", linewidth=0.6, linestyle="--")
-        ax.set_axisbelow(True)
-        ax.xaxis.grid(False)
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:+.1f}%"))
 
         fig.autofmt_xdate(rotation=0, ha="center")
-        plt.tight_layout(pad=0.5)
+        plt.tight_layout(pad=0.3)
 
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", facecolor=APP_BG, bbox_inches="tight")
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight")
         plt.close(fig)
         buf.seek(0)
         return buf.read()
@@ -171,11 +146,7 @@ def render_pnl_chart(snapshots: list[dict]) -> bytes:
 
 
 def render_comparison_chart(snapshots: list[dict], benchmark: str = "SPY") -> bytes:
-    """
-    Render portfolio vs benchmark overlay, both normalised to 100 (item 11).
-    benchmark is fetched via yfinance (blocking — call via executor).
-    Returns PNG bytes.
-    """
+    """Render portfolio vs benchmark overlay, both normalised to 100."""
     if len(snapshots) < 2 or not benchmark:
         return b""
     try:
@@ -193,13 +164,11 @@ def render_comparison_chart(snapshots: list[dict], benchmark: str = "SPY") -> by
         end   = snap_dates[-1].strftime("%Y-%m-%d")
         bm_hist = yf.Ticker(benchmark).history(start=start, end=end)
 
-        # Build date→close dict for benchmark
         bm_dict: dict[str, float] = {}
         for idx, row in bm_hist.iterrows():
             d = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10]
             bm_dict[d] = float(row["Close"])
 
-        # Inner join on dates
         common_dates, port_vals, bm_vals = [], [], []
         for s in snapshots:
             if s["date"] in bm_dict:
@@ -210,39 +179,31 @@ def render_comparison_chart(snapshots: list[dict], benchmark: str = "SPY") -> by
         if len(common_dates) < 2:
             return render_portfolio_chart(snapshots)
 
-        # Normalise both to 100 at first common point
         p0 = port_vals[0] or 1.0
         b0 = bm_vals[0]   or 1.0
         port_norm = [v / p0 * 100 for v in port_vals]
         bm_norm   = [v / b0 * 100 for v in bm_vals]
 
-        fig, ax = plt.subplots(figsize=(8, 2.4), dpi=110)
-        fig.patch.set_facecolor(APP_BG)
-        ax.set_facecolor(SURFACE_2)
+        fig, ax = plt.subplots(figsize=(8, 1.8), dpi=110)
+        fig.patch.set_facecolor("none")
+        ax.set_facecolor("none")
 
-        ax.plot(common_dates, port_norm, color=ACCENT, linewidth=2,
+        ax.plot(common_dates, port_norm, color=ACCENT, linewidth=1.8,
                 solid_capstyle="round", label="Portfolio")
-        ax.plot(common_dates, bm_norm, color=ACCENT_CYAN, linewidth=1.5,
-                solid_capstyle="round", linestyle="--", label=benchmark)
+        ax.plot(common_dates, bm_norm, color=TEXT_2, linewidth=1.2,
+                solid_capstyle="round", linestyle="--", label=benchmark, alpha=0.7)
 
-        ax.legend(loc="upper left", framealpha=0, labelcolor=TEXT_2, fontsize=9)
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b '%y"))
+        ax.legend(loc="upper left", framealpha=0, labelcolor=TEXT_2, fontsize=8)
+        _setup_axes(ax)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
-        ax.tick_params(colors=TEXT_2, labelsize=9)
-        for spine in ax.spines.values():
-            spine.set_edgecolor("#1E1E22")
-        ax.yaxis.tick_right()
-        ax.yaxis.set_label_position("right")
-        ax.yaxis.grid(True, color="#1E1E22", linewidth=0.6, linestyle="--")
-        ax.set_axisbelow(True)
-        ax.xaxis.grid(False)
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}"))
 
         fig.autofmt_xdate(rotation=0, ha="center")
-        plt.tight_layout(pad=0.5)
+        plt.tight_layout(pad=0.3)
 
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", facecolor=APP_BG, bbox_inches="tight")
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight")
         plt.close(fig)
         buf.seek(0)
         return buf.read()
