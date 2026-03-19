@@ -34,3 +34,7 @@ Desktop.ini
 *.swp
 *.swo
 CLAUDE.md
+
+# Docs / plans / specs (local only)
+.superpowers/
+docs/superpowers/
