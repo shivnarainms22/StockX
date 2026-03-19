@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 
 from gui.state import AppState
 from gui.theme import (
-    ACCENT, ACCENT_CYAN, APP_BG, BORDER_CARD, BORDER_INPUT, BORDER_SUBTLE,
+    ACCENT, ACCENT_CYAN, ACCENT_HOVER, APP_BG, BORDER_CARD, BORDER_INPUT, BORDER_SUBTLE,
     NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, SURFACE_3, TEXT_1, TEXT_2, TEXT_MUTED, fmt_price,
 )
 
@@ -106,8 +106,12 @@ class WatchlistView(QWidget):
         )
 
         add_btn = QPushButton("+ Add")
-        add_btn.setObjectName("AccentBtn")
         add_btn.setFixedHeight(30)
+        add_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {ACCENT}; color: #0C0C0E; border: none;"
+            f"border-radius: 10px; padding: 6px 16px; font-size: 13px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }}"
+        )
         add_btn.clicked.connect(self._open_add_dialog)
 
         for w in [self._alerts_hist_btn, self._refresh_btn, add_btn]:

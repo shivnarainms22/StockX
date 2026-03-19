@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 
 from gui.state import AppState
 from gui.theme import (
-    ACCENT, ACCENT_CYAN, BORDER_SUBTLE,
+    ACCENT, ACCENT_CYAN, ACCENT_HOVER, BORDER_SUBTLE,
     NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, SURFACE_3, TEXT_1, TEXT_2, TEXT_MUTED,
     fmt_price, currency_symbol,
 )
@@ -127,8 +127,12 @@ class PortfolioView(QWidget):
         )
 
         add_btn = QPushButton("+ Add Holding")
-        add_btn.setObjectName("AccentBtn")
         add_btn.setFixedHeight(30)
+        add_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {ACCENT}; color: #0C0C0E; border: none;"
+            f"border-radius: 10px; padding: 6px 16px; font-size: 13px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background-color: {ACCENT_HOVER}; }}"
+        )
         add_btn.clicked.connect(self._open_add_dialog)
 
         for w in [self._refresh_btn, add_btn]:
@@ -272,9 +276,10 @@ class PortfolioView(QWidget):
 
         bg = SURFACE_2 if idx % 2 == 0 else SURFACE_1
         row = QFrame()
+        row.setObjectName("HoldingRow")
         row.setStyleSheet(
-            f"QFrame {{ background-color: {bg}; border-radius: 14px; }}"
-            f"QFrame:hover {{ background-color: {SURFACE_3}; }}"
+            f"QFrame#HoldingRow {{ background-color: {bg}; border-radius: 14px; }}"
+            f"QFrame#HoldingRow:hover {{ background-color: {SURFACE_3}; }}"
         )
 
         h = QHBoxLayout(row)
@@ -297,8 +302,8 @@ class PortfolioView(QWidget):
         # Delete
         del_btn = QPushButton("\u2715")
         del_btn.setStyleSheet(
-            f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: none; font-size: 14px; border-radius: 6px; }}"
-            f"QPushButton:hover {{ color: {NEGATIVE}; background: rgba(251,113,133,0.08); }}"
+            f"QPushButton {{ color: {TEXT_1}; background: transparent; border: none; font-size: 16px; border-radius: 6px; }}"
+            f"QPushButton:hover {{ color: {NEGATIVE}; background: rgba(251,113,133,0.10); }}"
         )
         del_btn.setFixedSize(28, 28)
         del_btn.clicked.connect(lambda _=False, t=ticker: self._remove_holding(t))
