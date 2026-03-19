@@ -9,17 +9,17 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QImage, QPixmap
+from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
-    QComboBox, QDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
+    QComboBox, QDialog, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QScrollArea, QSizePolicy,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget,
 )
 
 from gui.state import AppState
 from gui.theme import (
-    ACCENT, ACCENT_CYAN, BORDER_CARD, BORDER_SUBTLE,
-    NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, TEXT_1, TEXT_2, TEXT_MUTED,
+    ACCENT, ACCENT_CYAN, BORDER_SUBTLE,
+    NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, SURFACE_3, TEXT_1, TEXT_2, TEXT_MUTED,
     fmt_price, currency_symbol,
 )
 
@@ -60,7 +60,7 @@ class PortfolioView(QWidget):
 
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(16, 16, 16, 16)
+        body_layout.setContentsMargins(32, 16, 32, 16)
         body_layout.setSpacing(16)
 
         # Chart controls row (items 10 & 11)
@@ -107,54 +107,47 @@ class PortfolioView(QWidget):
         self._chart_label.setFixedHeight(180)
         self._chart_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._chart_label.setStyleSheet(
-            f"background-color: {SURFACE_2}; border: 1px solid {BORDER_CARD}; border-radius: 12px;"
+            f"background-color: {SURFACE_2}; border: none; border-radius: 14px;"
         )
         self._chart_label.setVisible(False)
         body_layout.addWidget(self._chart_label)
 
-        # Table (item 12: added Ann. Income column)
-        self._table = QTableWidget(0, 9)
-        self._table.setHorizontalHeaderLabels(
-            ["Ticker", "Qty", "Avg Cost", "Price", "Value", "P&L $", "P&L %", "Ann. Income", ""]
-        )
-        hh = self._table.horizontalHeader()
-        for col, width in enumerate([90, 70, 90, 90, 90, 90, 80, 100]):
-            hh.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
-            self._table.setColumnWidth(col, width)
-        hh.setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(8, 40)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self._table.setAlternatingRowColors(True)
-        self._table.verticalHeader().setDefaultSectionSize(50)
-        body_layout.addWidget(self._table)
+        # List rows (replace QTableWidget)
+        self._rows_widget = QWidget()
+        self._rows_widget.setStyleSheet("background: transparent;")
+        self._rows_layout = QVBoxLayout(self._rows_widget)
+        self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._rows_layout.setSpacing(2)
+        body_layout.addWidget(self._rows_widget)
         body_layout.addStretch()
 
         scroll.setWidget(body)
         root.addWidget(scroll, stretch=1)
 
-    def _build_header(self) -> QFrame:
-        bar = QFrame()
-        bar.setObjectName("HeaderBar")
-        bar.setFixedHeight(48)
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(16, 0, 12, 0)
-        h.setSpacing(8)
+    def _build_header(self) -> QWidget:
+        header = QWidget()
+        header.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(header)
+        h.setContentsMargins(32, 20, 32, 8)
+        h.setSpacing(12)
 
-        icon  = QLabel("💼")
-        icon.setStyleSheet("font-size: 18px;")
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
         title = QLabel("Portfolio")
-        title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {TEXT_1};")
+        title.setStyleSheet(f"color: {TEXT_1}; font-size: 24px; font-weight: 700;")
+        subtitle = QLabel("Track holdings and performance")
+        subtitle.setStyleSheet(f"color: {TEXT_2}; font-size: 13px;")
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        h.addLayout(title_col)
+        h.addStretch()
 
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        self._refresh_btn = QPushButton("↻ Refresh Prices")
+        self._refresh_btn = QPushButton("Refresh Prices")
         self._refresh_btn.setFixedHeight(30)
         self._refresh_btn.setStyleSheet(
-            f"QPushButton {{ color: {ACCENT}; background: {SURFACE_2}; border: 1px solid {BORDER_CARD}; border-radius: 8px; padding: 4px 12px; }}"
-            f"QPushButton:hover {{ border-color: {ACCENT}; background: #1F2A40; }}"
+            f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none; border-radius: 10px; padding: 6px 16px; font-size: 13px; }}"
+            f"QPushButton:hover {{ background: {SURFACE_3}; }}"
         )
         self._refresh_btn.clicked.connect(
             lambda: asyncio.get_event_loop().create_task(self._refresh())
@@ -165,9 +158,9 @@ class PortfolioView(QWidget):
         add_btn.setFixedHeight(30)
         add_btn.clicked.connect(self._open_add_dialog)
 
-        for w in [icon, title, spacer, self._refresh_btn, add_btn]:
+        for w in [self._refresh_btn, add_btn]:
             h.addWidget(w)
-        return bar
+        return header
 
     def _build_summary_bar(self) -> QFrame:
         bar = QFrame()
@@ -278,52 +271,89 @@ class PortfolioView(QWidget):
         self._pnl_pct_txt.setStyleSheet(f"color: {pnl_color}; font-size: 13px; background: transparent;")
 
     def _build_rows(self) -> None:
-        self._table.setRowCount(0)
-        for row_idx, h in enumerate(self._state.portfolio):
-            ticker   = h["ticker"]
-            qty      = h["qty"]
-            avg_cost = h["avg_cost"]
-            price    = self._prices.get(ticker, avg_cost)
-            code     = self._currencies.get(ticker)
-            value    = price * qty
-            cost     = avg_cost * qty
-            pnl      = value - cost
-            pnl_pct  = (pnl / cost * 100) if cost else 0.0
-            pnl_color = POSITIVE if pnl >= 0 else NEGATIVE
-            sign = "+" if pnl >= 0 else ""
+        while self._rows_layout.count():
+            child = self._rows_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
-            self._table.insertRow(row_idx)
+        for idx, h_data in enumerate(self._state.portfolio):
+            row = self._make_holding_row(h_data, idx)
+            self._rows_layout.addWidget(row)
 
-            def _colored(txt: str, color: str, bold: bool = False) -> QTableWidgetItem:
-                item = QTableWidgetItem(txt)
-                item.setForeground(QColor(color))
-                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                if bold:
-                    from PyQt6.QtGui import QFont
-                    f = item.font(); f.setBold(True); item.setFont(f)
-                return item
+    def _make_holding_row(self, h_data: dict, idx: int) -> QFrame:
+        ticker   = h_data["ticker"]
+        qty      = h_data["qty"]
+        avg_cost = h_data["avg_cost"]
+        price    = self._prices.get(ticker, avg_cost)
+        code     = self._currencies.get(ticker)
+        value    = price * qty
+        cost     = avg_cost * qty
+        pnl      = value - cost
+        pnl_pct  = (pnl / cost * 100) if cost else 0.0
+        pnl_color = POSITIVE if pnl >= 0 else NEGATIVE
+        sign     = "+" if pnl >= 0 else ""
 
-            # Ann. dividend income (item 12)
-            ttm_div = self._dividends.get(ticker, 0.0)
-            ann_income = ttm_div * qty
-            income_str = fmt_price(ann_income, code) if ann_income > 0 else "—"
+        ttm_div    = self._dividends.get(ticker, 0.0)
+        ann_income = ttm_div * qty
+        income_str = fmt_price(ann_income, code) if ann_income > 0 else "\u2014"
 
-            self._table.setItem(row_idx, 0, _colored(ticker, ACCENT, bold=True))
-            self._table.setItem(row_idx, 1, _colored(f"{qty:g}", TEXT_1))
-            self._table.setItem(row_idx, 2, _colored(fmt_price(avg_cost, code), TEXT_2))
-            self._table.setItem(row_idx, 3, _colored(fmt_price(price, code), TEXT_1))
-            self._table.setItem(row_idx, 4, _colored(fmt_price(value, code), TEXT_1))
-            self._table.setItem(row_idx, 5, _colored(f"{sign}{fmt_price(pnl, code)}", pnl_color))
-            self._table.setItem(row_idx, 6, _colored(f"{sign}{pnl_pct:.2f}%", pnl_color))
-            self._table.setItem(row_idx, 7, _colored(income_str, ACCENT_CYAN))
+        bg = SURFACE_2 if idx % 2 == 0 else SURFACE_1
+        row = QFrame()
+        row.setStyleSheet(
+            f"QFrame {{ background-color: {bg}; border-radius: 14px; }}"
+            f"QFrame:hover {{ background-color: {SURFACE_3}; }}"
+        )
 
-            del_btn = QPushButton("✕")
-            del_btn.setStyleSheet(
-                f"QPushButton {{ color: {NEGATIVE}; background: transparent; border: none; font-size: 14px; font-weight: 600; }}"
-                f"QPushButton:hover {{ color: #ff6b6b; background: rgba(255,80,80,0.12); border-radius: 4px; }}"
-            )
-            del_btn.clicked.connect(lambda _=False, t=ticker: self._remove_holding(t))
-            self._table.setCellWidget(row_idx, 8, del_btn)
+        h = QHBoxLayout(row)
+        h.setContentsMargins(16, 12, 16, 12)
+        h.setSpacing(16)
+
+        # Ticker
+        ticker_lbl = QLabel(ticker)
+        ticker_lbl.setStyleSheet(f"color: {ACCENT}; font-size: 14px; font-weight: 700; background: transparent; min-width: 50px;")
+
+        # Qty
+        qty_lbl = QLabel(f"{qty:g} shares")
+        qty_lbl.setStyleSheet(f"color: {TEXT_2}; font-size: 12px; background: transparent; min-width: 70px;")
+
+        # Price
+        price_lbl = QLabel(fmt_price(price, code))
+        price_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 14px; font-weight: 600; background: transparent;")
+        price_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        # Value
+        val_lbl = QLabel(fmt_price(value, code))
+        val_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 14px; font-weight: 600; background: transparent;")
+        val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        # P&L
+        pnl_lbl = QLabel(f"{sign}{fmt_price(pnl, code)}")
+        pnl_lbl.setStyleSheet(f"color: {pnl_color}; font-size: 13px; font-weight: 600; background: transparent;")
+        pnl_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        pnl_pct_lbl = QLabel(f"{sign}{pnl_pct:.1f}%")
+        pnl_pct_lbl.setStyleSheet(f"color: {pnl_color}; font-size: 12px; background: transparent; min-width: 50px;")
+        pnl_pct_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+        # Delete
+        del_btn = QPushButton("\u2715")
+        del_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: none; font-size: 14px; border-radius: 6px; }}"
+            f"QPushButton:hover {{ color: {NEGATIVE}; background: rgba(251,113,133,0.08); }}"
+        )
+        del_btn.setFixedSize(28, 28)
+        del_btn.clicked.connect(lambda _=False, t=ticker: self._remove_holding(t))
+
+        h.addWidget(ticker_lbl)
+        h.addWidget(qty_lbl)
+        h.addStretch()
+        h.addWidget(price_lbl)
+        h.addWidget(val_lbl)
+        h.addWidget(pnl_lbl)
+        h.addWidget(pnl_pct_lbl)
+        h.addWidget(del_btn)
+
+        return row
 
     def _update_dividend_income(self) -> None:
         """Update the Ann. Dividend Income summary card (item 12)."""
@@ -483,7 +513,7 @@ class PortfolioView(QWidget):
         dlg = QDialog(self)
         dlg.setWindowTitle("Add Holding")
         dlg.setMinimumWidth(320)
-        dlg.setStyleSheet("QDialog { background-color: #141E2E; }")
+        dlg.setStyleSheet("QDialog { background-color: #161618; }")
 
         layout = QVBoxLayout(dlg)
         layout.setSpacing(10)

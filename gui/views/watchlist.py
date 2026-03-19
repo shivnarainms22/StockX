@@ -7,43 +7,22 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QImage, QPixmap
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QPushButton, QScrollArea, QSizePolicy, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QDialog, QFrame, QHBoxLayout, QLabel,
+    QLineEdit, QPushButton, QScrollArea,
+    QVBoxLayout, QWidget,
 )
 
 from gui.state import AppState
 from gui.theme import (
     ACCENT, ACCENT_CYAN, APP_BG, BORDER_CARD, BORDER_INPUT, BORDER_SUBTLE,
-    NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, TEXT_1, TEXT_MUTED, fmt_price,
+    NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, SURFACE_3, TEXT_1, TEXT_2, TEXT_MUTED, fmt_price,
 )
 
 if TYPE_CHECKING:
     from gui.app import MainWindow
-
-
-# ── Drag-to-reorder table (item 8) ───────────────────────────────────────────
-
-class _DraggableTable(QTableWidget):
-    """QTableWidget subclass that emits row reorder signals on drag-drop."""
-    rows_reordered = pyqtSignal(int, int)  # (from_row, to_row)
-
-    def __init__(self, *args) -> None:
-        super().__init__(*args)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.setDragEnabled(True)
-        self.setDropIndicatorShown(True)
-        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-
-    def dropEvent(self, event) -> None:
-        from_row = self.currentRow()
-        super().dropEvent(event)
-        to_row = self.currentRow()
-        if from_row != to_row and from_row >= 0 and to_row >= 0:
-            self.rows_reordered.emit(from_row, to_row)
 
 
 # ── WatchlistView ─────────────────────────────────────────────────────────────
@@ -67,78 +46,74 @@ class WatchlistView(QWidget):
         root.setSpacing(0)
         root.addWidget(self._build_header())
 
-        # Main content area: table + optional alert panel side-by-side
+        # Main content area: rows + optional alert panel side-by-side
         content = QWidget()
         content_h = QHBoxLayout(content)
         content_h.setContentsMargins(0, 0, 0, 0)
         content_h.setSpacing(0)
 
-        # Columns: Ticker(0) Price(1) Spark(2) RSI(3) Targets(4) Alert(5) Del(6)
-        self._table = _DraggableTable(0, 7)
-        self._table.setHorizontalHeaderLabels(
-            ["Ticker", "Price", "7D", "RSI", "Targets", "Alert Conditions", ""]
-        )
-        hh = self._table.horizontalHeader()
-        col_widths = [90, 100, 100, 70, 110, 130, 50]
-        for col, w in enumerate(col_widths):
-            hh.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
-            self._table.setColumnWidth(col, w)
-        hh.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        hh.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self._table.setColumnWidth(6, 50)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self._table.setAlternatingRowColors(True)
-        self._table.verticalHeader().setDefaultSectionSize(52)
-        self._table.rows_reordered.connect(self._on_rows_reordered)
+        # Scroll area for list rows
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
 
-        content_h.addWidget(self._table, stretch=1)
+        self._rows_widget = QWidget()
+        self._rows_layout = QVBoxLayout(self._rows_widget)
+        self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._rows_layout.setContentsMargins(32, 8, 32, 16)
+        self._rows_layout.setSpacing(2)
 
-        # Alert history panel (item 15) — hidden by default
+        scroll.setWidget(self._rows_widget)
+        content_h.addWidget(scroll, stretch=1)
+
+        # Alert history panel — hidden by default
         self._alert_panel = self._build_alert_panel()
         content_h.addWidget(self._alert_panel)
 
         root.addWidget(content, stretch=1)
 
-    def _build_header(self) -> QFrame:
-        bar = QFrame()
-        bar.setObjectName("HeaderBar")
-        bar.setFixedHeight(48)
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(16, 0, 12, 0)
-        h.setSpacing(8)
+    def _build_header(self) -> QWidget:
+        header = QWidget()
+        header.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(header)
+        h.setContentsMargins(32, 20, 32, 8)
+        h.setSpacing(12)
 
-        icon  = QLabel("⭐")
-        icon.setStyleSheet("font-size: 18px;")
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
         title = QLabel("Watchlist")
-        title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {TEXT_1};")
+        title.setStyleSheet(f"color: {TEXT_1}; font-size: 24px; font-weight: 700;")
+        subtitle = QLabel("Track tickers with price and RSI alerts")
+        subtitle.setStyleSheet(f"color: {TEXT_2}; font-size: 13px;")
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        h.addLayout(title_col)
+        h.addStretch()
 
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._alerts_hist_btn = QPushButton(f"Alerts ({len(self._state.alert_history)})")
+        self._alerts_hist_btn.setObjectName("Chip")
+        self._alerts_hist_btn.setFixedHeight(30)
+        self._alerts_hist_btn.clicked.connect(self._toggle_alert_panel)
 
-        self._refresh_btn = QPushButton("↻ Refresh")
-        self._refresh_btn.setObjectName("IconBtn")
+        self._refresh_btn = QPushButton("Refresh")
         self._refresh_btn.setFixedHeight(30)
-        self._refresh_btn.setStyleSheet(f"QPushButton {{ color: {ACCENT}; background: transparent; border: none; }} QPushButton:hover {{ background: #1F2A40; border-radius: 6px; }}")
+        self._refresh_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none; border-radius: 10px; padding: 6px 16px; font-size: 13px; }}"
+            f"QPushButton:hover {{ background: {SURFACE_3}; }}"
+        )
         self._refresh_btn.clicked.connect(
             lambda: asyncio.ensure_future(self.refresh())
         )
-
-        self._alerts_hist_btn = QPushButton(f"🔔 Alerts ({len(self._state.alert_history)})")
-        self._alerts_hist_btn.setObjectName("IconBtn")
-        self._alerts_hist_btn.setFixedHeight(30)
-        self._alerts_hist_btn.setStyleSheet(f"QPushButton {{ color: {ACCENT_CYAN}; background: transparent; border: none; font-size: 12px; }} QPushButton:hover {{ background: #1F2A40; border-radius: 6px; }}")
-        self._alerts_hist_btn.clicked.connect(self._toggle_alert_panel)
 
         add_btn = QPushButton("+ Add")
         add_btn.setObjectName("AccentBtn")
         add_btn.setFixedHeight(30)
         add_btn.clicked.connect(self._open_add_dialog)
 
-        for w in [icon, title, spacer, self._alerts_hist_btn, self._refresh_btn, add_btn]:
+        for w in [self._alerts_hist_btn, self._refresh_btn, add_btn]:
             h.addWidget(w)
-        return bar
+        return header
 
     def _build_alert_panel(self) -> QFrame:
         """Side panel showing alert history (item 15)."""
@@ -160,7 +135,7 @@ class WatchlistView(QWidget):
         hdr_h.setContentsMargins(10, 0, 10, 0)
         title_lbl = QLabel("Alert History")
         title_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 13px; font-weight: 600;")
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton("\u2715")
         close_btn.setObjectName("IconBtn")
         close_btn.setFixedSize(24, 24)
         close_btn.clicked.connect(self._toggle_alert_panel)
@@ -185,113 +160,129 @@ class WatchlistView(QWidget):
         layout.addWidget(scroll, stretch=1)
         return panel
 
-    # ── Table building ────────────────────────────────────────────────────
-
-    def _alert_label(self, item: dict) -> str:
-        parts: list[str] = []
-        if item.get("price_above"): parts.append(f"P\u2265{item['price_above']}")
-        if item.get("price_below"): parts.append(f"P\u2264{item['price_below']}")
-        if item.get("rsi_above"):   parts.append(f"RSI\u2265{item['rsi_above']}")
-        if item.get("rsi_below"):   parts.append(f"RSI\u2264{item['rsi_below']}")
-        return "  |  ".join(parts) if parts else "\u2014"
+    # ── Row building ──────────────────────────────────────────────────────
 
     def _build_rows(self) -> None:
-        self._table.setRowCount(0)
-        for row_idx, item in enumerate(self._state.watchlist):
-            ticker = item["ticker"]
-            live   = self._live.get(ticker, {})
-            price_str = fmt_price(live["price"], live.get("currency")) if "price" in live else "\u2014"
-            rsi_val   = live.get("rsi")
-            rsi_str   = f"{rsi_val:.1f}" if rsi_val is not None else "\u2014"
-            rsi_color = NEGATIVE if (rsi_val or 50) >= 70 else (POSITIVE if (rsi_val or 50) <= 30 else TEXT_1)
+        # Clear existing rows
+        while self._rows_layout.count():
+            child = self._rows_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
-            self._table.insertRow(row_idx)
-            self._table.setRowHeight(row_idx, 52)
+        if not self._state.watchlist:
+            empty = QLabel("No tickers in watchlist. Click '+ Add' to get started.")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px; padding: 40px;")
+            self._rows_layout.addWidget(empty)
+            return
 
-            # Col 0: Ticker — clickable button
-            ticker_btn = QPushButton(ticker)
-            ticker_btn.setStyleSheet(
-                f"QPushButton {{ color: {ACCENT}; background: transparent; border: none;"
-                f"font-weight: 600; font-size: 13px; text-align: left; }}"
-                f"QPushButton:hover {{ color: {ACCENT_CYAN}; }}"
-            )
-            ticker_btn.clicked.connect(lambda _=False, t=ticker: self._mw.switch_to_analysis(f"Analyse {t}"))
-            self._table.setCellWidget(row_idx, 0, ticker_btn)
+        for idx, item in enumerate(self._state.watchlist):
+            row = self._make_row(item, idx)
+            self._rows_layout.addWidget(row)
 
-            # Col 1: Price
-            price_item = QTableWidgetItem(price_str)
-            price_item.setForeground(QColor(TEXT_1))
-            price_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-            self._table.setItem(row_idx, 1, price_item)
+    def _make_row(self, item: dict, idx: int) -> QFrame:
+        ticker = item["ticker"]
+        live = self._live.get(ticker, {})
+        price_str = fmt_price(live["price"], live.get("currency")) if "price" in live else "\u2014"
+        rsi_val = live.get("rsi")
+        rsi_str = f"{rsi_val:.1f}" if rsi_val is not None else "\u2014"
+        rsi_color = NEGATIVE if (rsi_val or 50) >= 70 else (POSITIVE if (rsi_val or 50) <= 30 else TEXT_1)
 
-            # Col 2: Sparkline (item 7)
-            spark_bytes = self._sparklines.get(ticker, b"")
-            if spark_bytes:
-                lbl = QLabel()
-                lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                img = QImage.fromData(bytes(spark_bytes))
-                lbl.setPixmap(QPixmap.fromImage(img))
-                self._table.setCellWidget(row_idx, 2, lbl)
-            else:
-                self._table.setItem(row_idx, 2, QTableWidgetItem("—"))
+        bg = SURFACE_2 if idx % 2 == 0 else SURFACE_1
+        row = QFrame()
+        row.setStyleSheet(
+            f"QFrame {{ background-color: {bg}; border-radius: 14px; }}"
+            f"QFrame:hover {{ background-color: {SURFACE_3}; }}"
+        )
+        row.setCursor(Qt.CursorShape.PointingHandCursor)
+        row.mousePressEvent = lambda ev, t=ticker: self._mw.switch_to_analysis(f"Analyse {t}")
 
-            # Col 3: RSI
-            rsi_item = QTableWidgetItem(rsi_str)
-            rsi_item.setForeground(QColor(rsi_color))
-            rsi_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-            self._table.setItem(row_idx, 3, rsi_item)
+        h = QHBoxLayout(row)
+        h.setContentsMargins(16, 14, 16, 14)
+        h.setSpacing(16)
 
-            # Col 4: Target prices (item 13)
-            bt = item.get("buy_target")
-            st = item.get("sell_target")
-            target_parts = []
-            if bt: target_parts.append(f"↑${bt:.2f}")
-            if st: target_parts.append(f"↓${st:.2f}")
-            target_text = "  ".join(target_parts) if target_parts else "—"
-            target_btn = QPushButton(target_text)
-            target_btn.setToolTip("Click to edit price targets & alerts")
-            target_btn.setStyleSheet(
-                f"QPushButton {{ color: {ACCENT_CYAN}; background: transparent; border: none;"
-                f"font-size: 11px; text-align: center; }}"
-                f"QPushButton:hover {{ color: {ACCENT}; }}"
-            )
-            target_btn.clicked.connect(lambda _=False, t=ticker: self._open_edit_alerts_dialog(t))
-            self._table.setCellWidget(row_idx, 4, target_btn)
+        # Avatar badge
+        avatar = QLabel(ticker[:2])
+        avatar.setFixedSize(40, 40)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        avatar.setStyleSheet(
+            f"background-color: rgba(212,168,67,0.08); border-radius: 10px;"
+            f"font-size: 14px; font-weight: 700; color: {ACCENT};"
+        )
 
-            # Col 5: Alert conditions — clickable to edit
-            alert_label = self._alert_label(item)
-            alert_btn = QPushButton(alert_label)
-            alert_btn.setToolTip("Click to edit alert conditions")
-            alert_btn.setStyleSheet(
-                f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: none;"
-                f"font-size: 12px; text-align: left; padding-left: 4px; }}"
-                f"QPushButton:hover {{ color: {ACCENT_CYAN}; }}"
-            )
-            alert_btn.clicked.connect(lambda _=False, t=ticker: self._open_edit_alerts_dialog(t))
-            self._table.setCellWidget(row_idx, 5, alert_btn)
+        # Ticker + company
+        info = QVBoxLayout()
+        info.setSpacing(1)
+        ticker_lbl = QLabel(ticker)
+        ticker_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 14px; font-weight: 600; background: transparent;")
+        info.addWidget(ticker_lbl)
 
-            # Col 6: Delete button
-            del_btn = QPushButton("✕")
-            del_btn.setToolTip("Remove")
-            del_btn.setStyleSheet(
-                f"QPushButton {{ color: {NEGATIVE}; background: transparent; border: none; font-size: 14px; font-weight: 600; }}"
-                f"QPushButton:hover {{ color: #ff6b6b; background: rgba(255,80,80,0.12); border-radius: 4px; }}"
-            )
-            del_btn.clicked.connect(lambda _=False, t=ticker: self._remove_ticker(t))
-            self._table.setCellWidget(row_idx, 6, del_btn)
+        # Sparkline
+        spark_lbl = QLabel()
+        spark_lbl.setFixedSize(80, 32)
+        spark_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        spark_bytes = self._sparklines.get(ticker, b"")
+        if spark_bytes:
+            img = QImage.fromData(bytes(spark_bytes))
+            spark_lbl.setPixmap(QPixmap.fromImage(img))
+        spark_lbl.setStyleSheet("background: transparent;")
+
+        # Price
+        price_col = QVBoxLayout()
+        price_col.setSpacing(1)
+        price_lbl = QLabel(price_str)
+        price_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 15px; font-weight: 600; background: transparent;")
+        price_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+        price_col.addWidget(price_lbl)
+
+        # RSI
+        rsi_frame = QVBoxLayout()
+        rsi_frame.setSpacing(0)
+        rsi_label_top = QLabel("RSI")
+        rsi_label_top.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent;")
+        rsi_label_top.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        rsi_val_lbl = QLabel(rsi_str)
+        rsi_val_lbl.setStyleSheet(f"color: {rsi_color}; font-size: 13px; font-weight: 600; background: transparent;")
+        rsi_val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        rsi_frame.addWidget(rsi_label_top)
+        rsi_frame.addWidget(rsi_val_lbl)
+
+        rsi_widget = QWidget()
+        rsi_widget.setFixedWidth(50)
+        rsi_widget.setLayout(rsi_frame)
+        rsi_widget.setStyleSheet("background: transparent;")
+
+        # Action buttons (edit/delete)
+        edit_btn = QPushButton("\u270e")
+        edit_btn.setObjectName("IconBtn")
+        edit_btn.setFixedSize(28, 28)
+        edit_btn.setToolTip("Edit alerts & targets")
+        edit_btn.clicked.connect(lambda _=False, t=ticker: self._open_edit_alerts_dialog(t))
+
+        del_btn = QPushButton("\u2715")
+        del_btn.setObjectName("IconBtn")
+        del_btn.setFixedSize(28, 28)
+        del_btn.setToolTip("Remove")
+        del_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: none; font-size: 14px; border-radius: 6px; }}"
+            f"QPushButton:hover {{ color: {NEGATIVE}; background: rgba(251,113,133,0.08); }}"
+        )
+        del_btn.clicked.connect(lambda _=False, t=ticker: self._remove_ticker(t))
+
+        h.addWidget(avatar)
+        h.addLayout(info, stretch=1)
+        h.addWidget(spark_lbl)
+        h.addLayout(price_col)
+        h.addWidget(rsi_widget)
+        h.addWidget(edit_btn)
+        h.addWidget(del_btn)
+
+        return row
 
     def _remove_ticker(self, ticker: str) -> None:
         self._state.watchlist = [x for x in self._state.watchlist if x["ticker"] != ticker]
         self._state.save_watchlist()
         self._build_rows()
-
-    def _on_rows_reordered(self, from_row: int, to_row: int) -> None:
-        """Persist watchlist reorder after drag-drop (item 8)."""
-        wl = self._state.watchlist
-        if 0 <= from_row < len(wl) and 0 <= to_row < len(wl):
-            item = wl.pop(from_row)
-            wl.insert(to_row, item)
-            self._state.save_watchlist()
 
     def _toggle_alert_panel(self) -> None:
         """Show/hide the alert history panel (item 15)."""
@@ -300,7 +291,7 @@ class WatchlistView(QWidget):
         if self._alert_panel_visible:
             self._refresh_alert_panel()
         count = len(self._state.alert_history)
-        self._alerts_hist_btn.setText(f"🔔 Alerts ({count})")
+        self._alerts_hist_btn.setText(f"Alerts ({count})")
 
     def _refresh_alert_panel(self) -> None:
         """Populate alert history cards."""
@@ -319,8 +310,7 @@ class WatchlistView(QWidget):
         for entry in self._state.alert_history[:50]:
             card = QFrame()
             card.setStyleSheet(
-                f"QFrame {{ background-color: {SURFACE_2}; border: 1px solid {BORDER_CARD};"
-                f"border-radius: 6px; }}"
+                f"QFrame {{ background-color: {SURFACE_2}; border-radius: 8px; }}"
             )
             cl = QVBoxLayout(card)
             cl.setContentsMargins(8, 6, 8, 6)
@@ -328,7 +318,7 @@ class WatchlistView(QWidget):
 
             atype = entry.get("type", "price")
             dot_color = type_colors.get(atype, TEXT_MUTED)
-            msg_lbl = QLabel(f"● {entry.get('message', '')}")
+            msg_lbl = QLabel(f"\u25cf {entry.get('message', '')}")
             msg_lbl.setWordWrap(True)
             msg_lbl.setStyleSheet(
                 f"color: {dot_color}; font-size: 11px; background: transparent; border: none;"
@@ -352,9 +342,9 @@ class WatchlistView(QWidget):
             return
 
         dlg = QDialog(self)
-        dlg.setWindowTitle(f"Edit Alerts — {ticker}")
+        dlg.setWindowTitle(f"Edit Alerts \u2014 {ticker}")
         dlg.setMinimumWidth(340)
-        dlg.setStyleSheet("QDialog { background-color: #141E2E; }")
+        dlg.setStyleSheet("QDialog { background-color: #161618; }")
 
         layout = QVBoxLayout(dlg)
         layout.setSpacing(10)
@@ -479,7 +469,7 @@ class WatchlistView(QWidget):
         dlg = QDialog(self)
         dlg.setWindowTitle("Add to Watchlist")
         dlg.setMinimumWidth(340)
-        dlg.setStyleSheet(f"QDialog {{ background-color: #141E2E; }}")
+        dlg.setStyleSheet(f"QDialog {{ background-color: #161618; }}")
 
         layout = QVBoxLayout(dlg)
         layout.setSpacing(10)

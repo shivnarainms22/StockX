@@ -12,14 +12,14 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QSizePolicy, QSlider,
+    QPushButton, QScrollArea, QSlider,
     QVBoxLayout, QWidget,
 )
 
 from gui.state import AppState
 from gui.theme import (
-    ACCENT, BORDER_CARD, BORDER_SUBTLE, NEGATIVE, POSITIVE,
-    SURFACE_1, SURFACE_2, TEXT_1, TEXT_2, TEXT_MUTED,
+    ACCENT, NEGATIVE, POSITIVE,
+    SURFACE_2, SURFACE_3, TEXT_1, TEXT_2, TEXT_MUTED,
 )
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ class SettingsView(QWidget):
 
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(40, 24, 40, 24)
+        body_layout.setContentsMargins(32, 16, 32, 16)
         body_layout.setSpacing(0)
 
         # ── API Keys card ─────────────────────────────────────────────────
@@ -121,7 +121,7 @@ class SettingsView(QWidget):
 
         # ── Save row ──────────────────────────────────────────────────────
         save_row = QHBoxLayout()
-        save_btn = QPushButton("💾 Save Settings")
+        save_btn = QPushButton("Save Settings")
         save_btn.setObjectName("AccentBtn")
         save_btn.setFixedHeight(38)
         save_btn.clicked.connect(lambda: asyncio.get_event_loop().create_task(self._save()))
@@ -138,21 +138,18 @@ class SettingsView(QWidget):
         scroll.setWidget(body)
         root.addWidget(scroll, stretch=1)
 
-    def _build_header(self) -> QFrame:
-        bar = QFrame()
-        bar.setObjectName("HeaderBar")
-        bar.setFixedHeight(48)
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(16, 0, 12, 0)
-        h.setSpacing(8)
-        icon  = QLabel("⚙")
-        icon.setStyleSheet("font-size: 18px;")
+    def _build_header(self) -> QWidget:
+        header = QWidget()
+        header.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(header)
+        h.setContentsMargins(32, 20, 32, 8)
+        h.setSpacing(12)
+
         title = QLabel("Settings")
-        title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {TEXT_1};")
-        h.addWidget(icon)
+        title.setStyleSheet(f"color: {TEXT_1}; font-size: 24px; font-weight: 700;")
         h.addWidget(title)
         h.addStretch()
-        return bar
+        return header
 
     def _key_field(self, placeholder: str, env_key: str) -> QLineEdit:
         field = QLineEdit()
@@ -198,18 +195,17 @@ class SettingsView(QWidget):
         card = QFrame()
         card.setObjectName("Card")
         card.setStyleSheet(
-            f"QFrame#Card {{ background-color: {SURFACE_1}; border-radius: 12px;"
-            f"border: 1px solid {BORDER_SUBTLE}; }}"
+            f"QFrame#Card {{ background-color: {SURFACE_2}; border-radius: 14px; border: none; }}"
         )
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(10)
 
         # Section label
         section_lbl = QLabel(title.upper())
         section_lbl.setStyleSheet(
-            f"color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 2px;"
-            f"border-left: 3px solid {ACCENT}; padding-left: 8px; background: transparent;"
+            f"color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px;"
+            f"background: transparent;"
         )
         layout.addWidget(section_lbl)
         layout.addSpacing(4)

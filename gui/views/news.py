@@ -12,14 +12,14 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-    QSizePolicy, QVBoxLayout, QWidget,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+    QVBoxLayout, QWidget,
 )
 
 from gui.state import AppState
 from gui.theme import (
     ACCENT, ACCENT_CYAN, ACCENT_GLOW, BORDER_CARD, BORDER_SUBTLE,
-    NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, TEXT_1, TEXT_MUTED,
+    NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, SURFACE_3, TEXT_1, TEXT_2, TEXT_MUTED,
 )
 
 if TYPE_CHECKING:
@@ -45,23 +45,23 @@ class _NewsCard(QFrame):
 
         self.setObjectName("Card")
         self.setStyleSheet(
-            f"QFrame#Card {{ background-color: {SURFACE_2}; border: 1px solid {BORDER_CARD}; border-radius: 10px; }}"
-            f"QFrame#Card:hover {{ border-color: {ACCENT}; }}"
+            f"QFrame#Card {{ background-color: {SURFACE_2}; border: none; border-radius: 14px; }}"
+            f"QFrame#Card:hover {{ background-color: {SURFACE_3}; }}"
         )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(6)
 
         headline = QLabel(article["title"])
         headline.setWordWrap(True)
-        headline.setStyleSheet(f"color: {TEXT_1}; font-size: 13px; font-weight: 600; background: transparent; border: none;")
+        headline.setStyleSheet(f"color: {TEXT_1}; font-size: 14px; font-weight: 600; background: transparent; border: none;")
         headline.setMaximumHeight(60)
 
         ticker_chip = QLabel(article["ticker"])
         ticker_chip.setStyleSheet(
-            f"color: {ACCENT_CYAN}; font-size: 10px; font-weight: 600;"
-            f"background-color: rgba(0,200,150,0.15); border-radius: 8px; padding: 1px 6px;"
+            f"color: {ACCENT}; font-size: 11px; font-weight: 600;"
+            f"background-color: rgba(212,168,67,0.08); border-radius: 12px; padding: 3px 10px;"
         )
         ticker_chip.setFixedHeight(18)
 
@@ -124,10 +124,9 @@ class NewsView(QWidget):
         scroll.setStyleSheet("QScrollArea { border: none; }")
 
         self._body_widget = QWidget()
-        self._body_layout = QVBoxLayout(self._body_widget)
-        self._body_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._body_layout.setContentsMargins(16, 12, 16, 16)
-        self._body_layout.setSpacing(10)
+        self._body_layout = QGridLayout(self._body_widget)
+        self._body_layout.setContentsMargins(32, 12, 32, 16)
+        self._body_layout.setSpacing(12)
 
         # Initial loading label — _clear_cards() will remove it on first refresh
         loading_lbl = QLabel("Loading news...")
@@ -138,35 +137,36 @@ class NewsView(QWidget):
         scroll.setWidget(self._body_widget)
         root.addWidget(scroll, stretch=1)
 
-    def _build_header(self) -> QFrame:
-        bar = QFrame()
-        bar.setObjectName("HeaderBar")
-        bar.setFixedHeight(48)
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(16, 0, 12, 0)
-        h.setSpacing(8)
+    def _build_header(self) -> QWidget:
+        header = QWidget()
+        header.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(header)
+        h.setContentsMargins(32, 20, 32, 8)
+        h.setSpacing(12)
 
-        icon  = QLabel("📰")
-        icon.setStyleSheet("font-size: 18px;")
-        title = QLabel("News Feed")
-        title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {TEXT_1};")
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        title = QLabel("News")
+        title.setStyleSheet(f"color: {TEXT_1}; font-size: 24px; font-weight: 700;")
+        subtitle = QLabel("Latest financial headlines")
+        subtitle.setStyleSheet(f"color: {TEXT_2}; font-size: 13px;")
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        h.addLayout(title_col)
+        h.addStretch()
 
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        self._refresh_btn = QPushButton("↻")
-        self._refresh_btn.setObjectName("IconBtn")
-        self._refresh_btn.setToolTip("Refresh news")
-        self._refresh_btn.setFixedSize(32, 32)
+        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn.setFixedHeight(30)
+        self._refresh_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none; border-radius: 10px; padding: 6px 16px; font-size: 13px; }}"
+            f"QPushButton:hover {{ background: {SURFACE_3}; }}"
+        )
         self._refresh_btn.clicked.connect(
             lambda: asyncio.get_event_loop().create_task(self._refresh())
         )
 
-        h.addWidget(icon)
-        h.addWidget(title)
-        h.addWidget(spacer)
         h.addWidget(self._refresh_btn)
-        return bar
+        return header
 
     # ── Data loading ──────────────────────────────────────────────────────
 
@@ -258,8 +258,8 @@ class NewsView(QWidget):
             no_news.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px; font-style: italic; padding: 32px;")
             self._body_layout.addWidget(no_news)
         else:
-            for art in articles:
+            for i, art in enumerate(articles):
                 card = _NewsCard(art)
-                self._body_layout.addWidget(card)
+                self._body_layout.addWidget(card, i // 2, i % 2)
 
         self._refresh_btn.setEnabled(True)

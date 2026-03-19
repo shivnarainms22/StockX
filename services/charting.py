@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
-APP_BG    = "#0B0F1A"
-ACCENT    = "#00C896"
-ACCENT_CYAN = "#3DD9EB"
-TEXT_2    = "#A0AEC0"
-SURFACE_2 = "#1A2235"
-POSITIVE  = "#00D4AA"
-NEGATIVE  = "#FF6B6B"
+APP_BG    = "#0C0C0E"
+ACCENT    = "#D4A843"
+ACCENT_CYAN = "#BFA76E"
+TEXT_2    = "#87878F"
+SURFACE_2 = "#1A1A1D"
+POSITIVE  = "#34D399"
+NEGATIVE  = "#FB7185"
 
 
 def render_portfolio_chart(snapshots: list[dict]) -> bytes:
@@ -55,12 +55,12 @@ def render_portfolio_chart(snapshots: list[dict]) -> bytes:
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
         ax.tick_params(colors=TEXT_2, labelsize=9)
         for spine in ax.spines.values():
-            spine.set_edgecolor("#1E2D42")
+            spine.set_edgecolor("#1E1E22")
         ax.yaxis.tick_right()
         ax.yaxis.set_label_position("right")
 
         # Grid
-        ax.yaxis.grid(True, color="#1E2D42", linewidth=0.6, linestyle="--")
+        ax.yaxis.grid(True, color="#1E1E22", linewidth=0.6, linestyle="--")
         ax.set_axisbelow(True)
         ax.xaxis.grid(False)
 
@@ -142,7 +142,7 @@ def render_pnl_chart(snapshots: list[dict]) -> bytes:
         fig.patch.set_facecolor(APP_BG)
         ax.set_facecolor(SURFACE_2)
 
-        ax.axhline(0, color="#1E2D42", linewidth=1, linestyle="--")
+        ax.axhline(0, color="#1E1E22", linewidth=1, linestyle="--")
         ax.fill_between(dates, pcts, alpha=0.18, color=up_color)
         ax.plot(dates, pcts, color=up_color, linewidth=2, solid_capstyle="round")
 
@@ -150,10 +150,10 @@ def render_pnl_chart(snapshots: list[dict]) -> bytes:
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
         ax.tick_params(colors=TEXT_2, labelsize=9)
         for spine in ax.spines.values():
-            spine.set_edgecolor("#1E2D42")
+            spine.set_edgecolor("#1E1E22")
         ax.yaxis.tick_right()
         ax.yaxis.set_label_position("right")
-        ax.yaxis.grid(True, color="#1E2D42", linewidth=0.6, linestyle="--")
+        ax.yaxis.grid(True, color="#1E1E22", linewidth=0.6, linestyle="--")
         ax.set_axisbelow(True)
         ax.xaxis.grid(False)
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:+.1f}%"))
@@ -230,10 +230,10 @@ def render_comparison_chart(snapshots: list[dict], benchmark: str = "SPY") -> by
         ax.xaxis.set_major_locator(mdates.AutoDateLocator())
         ax.tick_params(colors=TEXT_2, labelsize=9)
         for spine in ax.spines.values():
-            spine.set_edgecolor("#1E2D42")
+            spine.set_edgecolor("#1E1E22")
         ax.yaxis.tick_right()
         ax.yaxis.set_label_position("right")
-        ax.yaxis.grid(True, color="#1E2D42", linewidth=0.6, linestyle="--")
+        ax.yaxis.grid(True, color="#1E1E22", linewidth=0.6, linestyle="--")
         ax.set_axisbelow(True)
         ax.xaxis.grid(False)
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}"))

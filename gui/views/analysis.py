@@ -156,52 +156,52 @@ class AnalysisView(QWidget):
         content_frame.setLayout(content_row)
         root.addWidget(content_frame, stretch=1)
 
-    def _build_header(self) -> QFrame:
-        bar = QFrame()
-        bar.setObjectName("HeaderBar")
-        bar.setFixedHeight(48)
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(16, 0, 12, 0)
-        h.setSpacing(8)
+    def _build_header(self) -> QWidget:
+        header = QWidget()
+        header.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(header)
+        h.setContentsMargins(32, 20, 32, 8)
+        h.setSpacing(12)
 
-        icon = QLabel("📊")
-        icon.setStyleSheet("font-size: 18px;")
-        title = QLabel("StockX Analysis")
-        title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {TEXT_1};")
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        title = QLabel("Analysis")
+        title.setStyleSheet(f"color: {TEXT_1}; font-size: 24px; font-weight: 700;")
+        subtitle = QLabel("AI-powered stock insights")
+        subtitle.setStyleSheet(f"color: {TEXT_2}; font-size: 13px;")
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        h.addLayout(title_col)
+        h.addStretch()
 
         self._provider_label = QLabel(self._state.detect_provider())
         self._provider_label.setStyleSheet(
             f"font-size: 11px; color: {ACCENT_CYAN}; background-color: {SURFACE_2};"
-            f"border: 1px solid {BORDER_CARD}; border-radius: 10px; padding: 2px 8px;"
+            f"border-radius: 10px; padding: 2px 8px;"
         )
 
         self._export_btn = _icon_btn("⬇", "Export as Markdown")
         self._export_btn.clicked.connect(self._export_chat)
-
-        self._pdf_btn = _icon_btn("📄", "Export as PDF (item 9)")
+        self._pdf_btn = _icon_btn("📄", "Export as PDF")
         self._pdf_btn.clicked.connect(self._export_pdf)
-
         self._history_btn = _icon_btn("📋", "Analysis history")
         self._history_btn.clicked.connect(self._toggle_history)
 
-        self._clear_btn = QPushButton("🗑 Clear")
+        self._clear_btn = QPushButton("Clear")
         self._clear_btn.setObjectName("DangerBtn")
         self._clear_btn.setFixedHeight(28)
         self._clear_btn.clicked.connect(self._clear_chat)
 
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        for w in [icon, title, spacer, self._provider_label,
-                  self._export_btn, self._pdf_btn, self._history_btn, self._clear_btn]:
+        for w in [self._provider_label, self._export_btn, self._pdf_btn,
+                  self._history_btn, self._clear_btn]:
             h.addWidget(w)
-        return bar
+        return header
 
     def _build_chips_row(self) -> QWidget:
         chips_widget = QWidget()
-        chips_widget.setStyleSheet(f"background-color: {SURFACE_1}; border-bottom: 1px solid {BORDER_SUBTLE};")
+        chips_widget.setStyleSheet("background: transparent;")
         h = QHBoxLayout(chips_widget)
-        h.setContentsMargins(12, 8, 12, 8)
+        h.setContentsMargins(32, 4, 32, 8)
         h.setSpacing(8)
 
         chip_defs = [
@@ -246,8 +246,8 @@ class AnalysisView(QWidget):
         self._chat_inner.setStyleSheet(f"background-color: {APP_BG};")
         self._chat_layout = QVBoxLayout(self._chat_inner)
         self._chat_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._chat_layout.setContentsMargins(8, 8, 8, 8)
-        self._chat_layout.setSpacing(4)
+        self._chat_layout.setContentsMargins(32, 12, 32, 12)
+        self._chat_layout.setSpacing(12)
 
         self._chat_scroll.setWidget(self._chat_inner)
         col.addWidget(self._chat_scroll, stretch=1)
@@ -274,7 +274,7 @@ class AnalysisView(QWidget):
 
     def _build_input_bar(self) -> QFrame:
         bar = QFrame()
-        bar.setObjectName("HeaderBar")  # reuses same background/border style
+        bar.setObjectName("InputBar")
         bar.setStyleSheet(
             f"QFrame {{ background-color: {SURFACE_1}; border-top: 1px solid {BORDER_SUBTLE}; }}"
         )
@@ -398,7 +398,7 @@ class AnalysisView(QWidget):
         if is_user:
             bubble.setStyleSheet(
                 "QFrame { background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                "stop:0 #006D5B, stop:1 #00A87C);"
+                "stop:0 #9A7B2F, stop:1 #C09635);"
                 "border-radius: 18px; border-bottom-right-radius: 4px; }"
             )
             h.addSpacing(80)
@@ -406,7 +406,7 @@ class AnalysisView(QWidget):
             h.addSpacing(8)
         else:
             bubble.setStyleSheet(
-                f"QFrame {{ background-color: {SURFACE_2}; border: 1px solid {BORDER_CARD};"
+                f"QFrame {{ background-color: {SURFACE_2};"
                 "border-radius: 18px; border-top-left-radius: 4px; }"
             )
             h.addSpacing(8)
@@ -466,7 +466,7 @@ class AnalysisView(QWidget):
 
         bubble = QFrame()
         bubble.setStyleSheet(
-            f"QFrame {{ background-color: {SURFACE_2}; border: 1px solid {BORDER_CARD};"
+            f"QFrame {{ background-color: {SURFACE_2};"
             "border-radius: 18px; border-top-left-radius: 4px; }"
         )
         b_layout = QVBoxLayout(bubble)
@@ -523,8 +523,8 @@ class AnalysisView(QWidget):
     def _make_history_card(self, entry: dict) -> QFrame:
         card = QFrame()
         card.setStyleSheet(
-            f"QFrame {{ background-color: {SURFACE_2}; border: 1px solid {BORDER_CARD}; border-radius: 8px; }}"
-            f"QFrame:hover {{ border-color: {ACCENT}; background-color: #1F2A40; }}"
+            f"QFrame {{ background-color: {SURFACE_2}; border-radius: 8px; }}"
+            f"QFrame:hover {{ background-color: #222226; }}"
         )
         card.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -628,7 +628,7 @@ class AnalysisView(QWidget):
 
         card = QFrame()
         card.setStyleSheet(
-            f"QFrame {{ background-color: {SURFACE_2}; border: 1px solid {BORDER_CARD};"
+            f"QFrame {{ background-color: {SURFACE_2};"
             f"border-radius: 10px; margin: 4px 8px 4px 8px; }}"
         )
         layout = QVBoxLayout(card)

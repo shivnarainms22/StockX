@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from gui.state import AppState
 from gui.theme import (
-    ACCENT, ACCENT_CYAN, BORDER_CARD, BORDER_SUBTLE,
-    NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, TEXT_1, TEXT_2, TEXT_MUTED,
+    ACCENT, NEGATIVE, POSITIVE, SURFACE_2, SURFACE_3,
+    TEXT_1, TEXT_2, TEXT_MUTED,
 )
 
 if TYPE_CHECKING:
@@ -71,12 +71,12 @@ class _HeatCell(QFrame):
         self._etf    = etf
         self._mw     = main_window
 
-        self.setFixedSize(140, 80)
+        self.setFixedSize(160, 90)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._apply_style(0.0)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(2)
 
         self._sector_lbl = QLabel(sector)
@@ -87,7 +87,7 @@ class _HeatCell(QFrame):
         self._etf_lbl.setStyleSheet(f"font-size: 10px; color: {TEXT_MUTED}; background: transparent;")
 
         self._pct_lbl = QLabel("—")
-        self._pct_lbl.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {TEXT_2}; background: transparent;")
+        self._pct_lbl.setStyleSheet(f"font-size: 18px; font-weight: 700; color: {TEXT_2}; background: transparent;")
 
         layout.addWidget(self._sector_lbl)
         layout.addWidget(self._etf_lbl)
@@ -100,14 +100,14 @@ class _HeatCell(QFrame):
         self._apply_style(pct)
         _, txt_color = _change_color(pct)
         self._pct_lbl.setStyleSheet(
-            f"font-size: 14px; font-weight: 700; color: {txt_color}; background: transparent;"
+            f"font-size: 18px; font-weight: 700; color: {txt_color}; background: transparent;"
         )
 
     def _apply_style(self, pct: float) -> None:
         bg, _ = _change_color(pct)
         self.setStyleSheet(
-            f"QFrame {{ background-color: {bg}; border: 1px solid {BORDER_CARD}; border-radius: 8px; }}"
-            f"QFrame:hover {{ border-color: {ACCENT}; }}"
+            f"QFrame {{ background-color: {bg}; border: none; border-radius: 14px; }}"
+            f"QFrame:hover {{ background-color: {bg}; }}"
         )
 
     def mousePressEvent(self, event) -> None:
@@ -141,7 +141,7 @@ class SectorHeatmapView(QWidget):
 
         body = QWidget()
         body_v = QVBoxLayout(body)
-        body_v.setContentsMargins(16, 16, 16, 16)
+        body_v.setContentsMargins(32, 16, 32, 16)
         body_v.setSpacing(12)
 
         # Last-updated label
@@ -168,36 +168,36 @@ class SectorHeatmapView(QWidget):
         scroll.setWidget(body)
         root.addWidget(scroll, stretch=1)
 
-    def _build_header(self) -> QFrame:
-        bar = QFrame()
-        bar.setObjectName("HeaderBar")
-        bar.setFixedHeight(48)
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(16, 0, 12, 0)
-        h.setSpacing(8)
+    def _build_header(self) -> QWidget:
+        header = QWidget()
+        header.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(header)
+        h.setContentsMargins(32, 20, 32, 8)
+        h.setSpacing(12)
 
-        icon  = QLabel("🌐")
-        icon.setStyleSheet("font-size: 18px;")
-        title = QLabel("Markets Heatmap")
-        title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {TEXT_1};")
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        title = QLabel("Markets")
+        title.setStyleSheet(f"color: {TEXT_1}; font-size: 24px; font-weight: 700;")
+        subtitle = QLabel("Sector performance today")
+        subtitle.setStyleSheet(f"color: {TEXT_2}; font-size: 13px;")
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        h.addLayout(title_col)
+        h.addStretch()
 
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        self._refresh_btn = QPushButton("↻ Refresh")
-        self._refresh_btn.setObjectName("IconBtn")
+        self._refresh_btn = QPushButton("Refresh")
         self._refresh_btn.setFixedHeight(30)
         self._refresh_btn.setStyleSheet(
-            f"QPushButton {{ color: {ACCENT}; background: transparent; border: none; }}"
-            f"QPushButton:hover {{ background: #1F2A40; border-radius: 6px; }}"
+            f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none; border-radius: 10px; padding: 6px 16px; font-size: 13px; }}"
+            f"QPushButton:hover {{ background: {SURFACE_3}; }}"
         )
         self._refresh_btn.clicked.connect(
             lambda: asyncio.ensure_future(self._refresh())
         )
 
-        for w in [icon, title, spacer, self._refresh_btn]:
-            h.addWidget(w)
-        return bar
+        h.addWidget(self._refresh_btn)
+        return header
 
     # ── Data loading ──────────────────────────────────────────────────────
 

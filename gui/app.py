@@ -1,6 +1,6 @@
 """
 StockX GUI — Main PyQt6 application.
-NavSidebar shell with 6-panel stock dashboard, qasync event loop.
+TopNavBar shell with 7-panel stock dashboard, qasync event loop.
 """
 from __future__ import annotations
 
@@ -16,129 +16,80 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QKeySequence, QShortcut
 
 from gui.state import AppState
-from gui.theme import ACCENT, ACCENT_GLOW, BORDER_SUBTLE, NAV_BG, TEXT_1, TEXT_MUTED
+from gui.theme import ACCENT, BORDER_SUBTLE, SURFACE_1, TEXT_1, TEXT_2
 from services.monitor import run_monitor
 
 
-# ── NavButton ─────────────────────────────────────────────────────────────────
+# ── TopNavBar ────────────────────────────────────────────────────────────────
 
-class NavButton(QFrame):
-    """72×64 nav icon + label button for the sidebar."""
-
-    clicked = pyqtSignal()
-
-    _STYLE_INACTIVE = "QFrame { background: transparent; border-radius: 8px; }"
-    _STYLE_ACTIVE   = "QFrame { background-color: rgba(0,200,150,0.15); border-radius: 8px; }"
-    _STYLE_HOVER    = f"QFrame {{ background-color: #1F2A40; border-radius: 8px; }}"
-
-    def __init__(self, icon: str, label: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._active = False
-        self.setFixedSize(72, 64)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet(self._STYLE_INACTIVE)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 8, 0, 8)
-        layout.setSpacing(2)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        icon_lbl = QLabel(icon)
-        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet("font-size: 18px; background: transparent;")
-
-        self._text_lbl = QLabel(label)
-        self._text_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._text_lbl.setStyleSheet(f"font-size: 10px; color: {TEXT_MUTED}; background: transparent;")
-
-        layout.addWidget(icon_lbl)
-        layout.addWidget(self._text_lbl)
-
-    def set_active(self, active: bool) -> None:
-        self._active = active
-        self.setStyleSheet(self._STYLE_ACTIVE if active else self._STYLE_INACTIVE)
-        color = ACCENT if active else TEXT_MUTED
-        self._text_lbl.setStyleSheet(f"font-size: 10px; color: {color}; background: transparent;")
-
-    def enterEvent(self, event) -> None:
-        if not self._active:
-            self.setStyleSheet(self._STYLE_HOVER)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event) -> None:
-        if not self._active:
-            self.setStyleSheet(self._STYLE_INACTIVE)
-        super().leaveEvent(event)
-
-    def mousePressEvent(self, event) -> None:
-        self.clicked.emit()
-        super().mousePressEvent(event)
-
-
-# ── NavSidebar ────────────────────────────────────────────────────────────────
-
-class NavSidebar(QFrame):
-    """72px left sidebar with logo + 6 NavButtons."""
+class TopNavBar(QFrame):
+    """52px horizontal navigation bar with brand text and tab items."""
 
     nav_changed = pyqtSignal(int)
 
-    _NAV_ITEMS = [
-        ("📊", "Analysis"),
-        ("⭐", "Watchlist"),
-        ("💼", "Portfolio"),
-        ("📰", "News"),
-        ("📅", "Earnings"),
-        ("🌐", "Markets"),
-        ("⚙", "Settings"),
-    ]
+    _TAB_LABELS = ["Analysis", "Watchlist", "Portfolio", "News", "Earnings", "Markets", "Settings"]
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("NavSidebar")
-        self.setFixedWidth(72)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Branding logo
-        logo_container = QFrame()
-        logo_container.setFixedSize(72, 56)
-        logo_container.setStyleSheet(f"background-color: {NAV_BG}; border-bottom: 1px solid {BORDER_SUBTLE};")
-        logo_layout = QHBoxLayout(logo_container)
-        logo_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_lbl = QLabel("S")
-        logo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_lbl.setFixedSize(36, 36)
-        logo_lbl.setStyleSheet(
-            f"color: {ACCENT}; font-size: 18px; font-weight: bold;"
-            f"background-color: rgba(0,200,150,0.15); border-radius: 8px;"
+        self.setObjectName("TopNavBar")
+        self.setFixedHeight(52)
+        self.setStyleSheet(
+            f"QFrame#TopNavBar {{ background-color: {SURFACE_1}; border-bottom: 1px solid {BORDER_SUBTLE}; }}"
         )
-        logo_layout.addWidget(logo_lbl)
-        layout.addWidget(logo_container)
 
-        # Nav buttons
-        self._buttons: list[NavButton] = []
-        for icon, label in self._NAV_ITEMS:
-            btn = NavButton(icon, label)
-            idx = len(self._buttons)
-            btn.clicked.connect(lambda _checked=False, i=idx: self._on_nav(i))
-            self._buttons.append(btn)
-            layout.addWidget(btn)
+        h = QHBoxLayout(self)
+        h.setContentsMargins(24, 0, 24, 0)
+        h.setSpacing(0)
 
-        layout.addStretch()
+        # Brand
+        brand = QLabel("StockX")
+        brand.setStyleSheet(
+            f"color: {ACCENT}; font-size: 17px; font-weight: 700; background: transparent;"
+            "padding-right: 32px;"
+        )
+        h.addWidget(brand)
+
+        # Tab items
+        self._tabs: list[QLabel] = []
+        for i, label in enumerate(self._TAB_LABELS):
+            tab = QLabel(label)
+            tab.setCursor(Qt.CursorShape.PointingHandCursor)
+            tab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tab.setFixedHeight(52)
+            tab.setContentsMargins(16, 0, 16, 0)
+            tab.mousePressEvent = lambda ev, idx=i: self._on_tab(idx)
+            self._tabs.append(tab)
+            h.addWidget(tab)
+
+        h.addStretch()
 
         self._active_idx = 0
-        self._buttons[0].set_active(True)
+        self._update_styles()
 
-    def _on_nav(self, idx: int) -> None:
-        self._buttons[self._active_idx].set_active(False)
+    def _on_tab(self, idx: int) -> None:
         self._active_idx = idx
-        self._buttons[idx].set_active(True)
+        self._update_styles()
         self.nav_changed.emit(idx)
 
     def set_active(self, idx: int) -> None:
-        self._on_nav(idx)
+        self._active_idx = idx
+        self._update_styles()
+        self.nav_changed.emit(idx)
+
+    def _update_styles(self) -> None:
+        for i, tab in enumerate(self._tabs):
+            if i == self._active_idx:
+                tab.setStyleSheet(
+                    f"color: {ACCENT}; font-size: 13px; font-weight: 600;"
+                    f"border-bottom: 2px solid {ACCENT}; background: transparent;"
+                    "padding-bottom: 0px;"
+                )
+            else:
+                tab.setStyleSheet(
+                    f"color: {TEXT_2}; font-size: 13px; font-weight: 500;"
+                    "border-bottom: 2px solid transparent; background: transparent;"
+                    "padding-bottom: 0px;"
+                )
 
 
 # ── MainWindow ────────────────────────────────────────────────────────────────
@@ -147,8 +98,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("StockX")
-        self.resize(1100, 750)
-        self.setMinimumSize(800, 550)
+        self.resize(1200, 800)
+        self.setMinimumSize(900, 600)
 
         # ── Shared state ──────────────────────────────────────────────────
         self._state = AppState()
@@ -164,16 +115,16 @@ class MainWindow(QMainWindow):
         except ValueError:
             pass
 
-        # ── Central layout ────────────────────────────────────────────────
+        # ── Central layout (vertical: topbar + stack) ─────────────────────
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
+        main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        self._sidebar = NavSidebar()
-        self._sidebar.nav_changed.connect(self._on_nav_changed)
-        main_layout.addWidget(self._sidebar)
+        self._topbar = TopNavBar()
+        self._topbar.nav_changed.connect(self._on_nav_changed)
+        main_layout.addWidget(self._topbar)
 
         self._stack = QStackedWidget()
         main_layout.addWidget(self._stack)
@@ -195,8 +146,6 @@ class MainWindow(QMainWindow):
         self._heatmap_view   = SectorHeatmapView(self._state, self)
         self._settings_view  = SettingsView(self._state, self)
 
-        # Sidebar order: Analysis(0) Watchlist(1) Portfolio(2) News(3)
-        #                Earnings(4) Markets(5) Settings(6)
         for view in [
             self._analysis_view, self._watchlist_view, self._portfolio_view,
             self._news_view, self._earnings_view,
@@ -204,10 +153,10 @@ class MainWindow(QMainWindow):
         ]:
             self._stack.addWidget(view)
 
-        # ── Keyboard shortcuts (item 6) — Ctrl+1…7 switch views ──────────
+        # ── Keyboard shortcuts — Ctrl+1…7 switch views ──────────
         for i in range(7):
             QShortcut(QKeySequence(f"Ctrl+{i+1}"), self).activated.connect(
-                lambda _=False, idx=i: self._sidebar.set_active(idx)
+                lambda _=False, idx=i: self._topbar.set_active(idx)
             )
 
         # ── Status bar ────────────────────────────────────────────────────
@@ -228,11 +177,11 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentIndex(idx)
 
     def switch_to_analysis(self, prefill: str) -> None:
-        self._sidebar.set_active(0)
+        self._topbar.set_active(0)
         self._stack.setCurrentIndex(0)
         self._analysis_view.set_input(prefill)
 
-    # ── Theme (item 5) ────────────────────────────────────────────────────
+    # ── Theme ─────────────────────────────────────────────────────────────
 
     def apply_theme(self, dark: bool) -> None:
         from gui.theme import get_stylesheet

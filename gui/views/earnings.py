@@ -9,17 +9,15 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QPushButton, QScrollArea, QSizePolicy,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel,
+    QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from gui.state import AppState
 from gui.theme import (
-    ACCENT, ACCENT_CYAN, BORDER_SUBTLE, NEGATIVE, POSITIVE,
-    SURFACE_1, SURFACE_2, TEXT_1, TEXT_2, TEXT_MUTED,
+    ACCENT, BORDER_CARD, BORDER_SUBTLE, NEGATIVE, POSITIVE,
+    SURFACE_1, SURFACE_2, SURFACE_3, TEXT_1, TEXT_2, TEXT_MUTED,
 )
 
 if TYPE_CHECKING:
@@ -43,20 +41,19 @@ class EarningsView(QWidget):
         root.setSpacing(0)
         root.addWidget(self._build_header())
 
-        # Table
-        self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(
-            ["Ticker", "Date", "Days Until", "EPS Est.", "Revenue Est."]
-        )
-        hh = self._table.horizontalHeader()
-        for col, width in enumerate([90, 110, 100, 110, 130]):
-            hh.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
-            self._table.setColumnWidth(col, width)
-        self._table.verticalHeader().setVisible(False)
-        self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self._table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self._table.setAlternatingRowColors(True)
-        self._table.verticalHeader().setDefaultSectionSize(48)
+        # Scroll area for list rows
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+
+        self._rows_widget = QWidget()
+        self._rows_layout = QVBoxLayout(self._rows_widget)
+        self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._rows_layout.setContentsMargins(32, 8, 32, 16)
+        self._rows_layout.setSpacing(2)
+
+        scroll.setWidget(self._rows_widget)
 
         # Status label (shown when empty)
         self._status_lbl = QLabel("No upcoming earnings data available")
@@ -66,38 +63,39 @@ class EarningsView(QWidget):
         )
         self._status_lbl.setVisible(False)
 
-        root.addWidget(self._table, stretch=1)
+        root.addWidget(scroll, stretch=1)
         root.addWidget(self._status_lbl)
 
-    def _build_header(self) -> QFrame:
-        bar = QFrame()
-        bar.setObjectName("HeaderBar")
-        bar.setFixedHeight(48)
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(16, 0, 12, 0)
-        h.setSpacing(8)
+    def _build_header(self) -> QWidget:
+        header = QWidget()
+        header.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(header)
+        h.setContentsMargins(32, 20, 32, 8)
+        h.setSpacing(12)
 
-        icon  = QLabel("📅")
-        icon.setStyleSheet("font-size: 18px;")
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
         title = QLabel("Earnings Calendar")
-        title.setStyleSheet(f"font-size: 15px; font-weight: 600; color: {TEXT_1};")
+        title.setStyleSheet(f"color: {TEXT_1}; font-size: 24px; font-weight: 700;")
+        subtitle = QLabel("Upcoming earnings dates for watched tickers")
+        subtitle.setStyleSheet(f"color: {TEXT_2}; font-size: 13px;")
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        h.addLayout(title_col)
+        h.addStretch()
 
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-
-        self._refresh_btn = QPushButton("↻")
-        self._refresh_btn.setObjectName("IconBtn")
-        self._refresh_btn.setToolTip("Refresh earnings calendar")
-        self._refresh_btn.setFixedSize(32, 32)
+        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn.setFixedHeight(30)
+        self._refresh_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none; border-radius: 10px; padding: 6px 16px; font-size: 13px; }}"
+            f"QPushButton:hover {{ background: {SURFACE_3}; }}"
+        )
         self._refresh_btn.clicked.connect(
             lambda: asyncio.get_event_loop().create_task(self._refresh())
         )
 
-        h.addWidget(icon)
-        h.addWidget(title)
-        h.addWidget(spacer)
         h.addWidget(self._refresh_btn)
-        return bar
+        return header
 
     # ── Data loading ──────────────────────────────────────────────────────
 
@@ -105,7 +103,11 @@ class EarningsView(QWidget):
         import yfinance as yf
 
         self._refresh_btn.setEnabled(False)
-        self._table.setRowCount(0)
+        # Clear existing rows
+        while self._rows_layout.count():
+            child = self._rows_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
         self._status_lbl.setVisible(False)
 
         tickers: list[str] = list({
@@ -179,32 +181,97 @@ class EarningsView(QWidget):
             if v >= 1e6: return f"${v/1e6:.2f}M"
             return f"${v:,.0f}"
 
-        self._table.setRowCount(len(rows))
+        # Clear existing rows
+        while self._rows_layout.count():
+            child = self._rows_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
         for row_idx, r in enumerate(rows):
-            highlight   = r["days"] <= 7
-            date_str    = r["date"].strftime("%Y-%m-%d")
-            days_str    = f"{r['days']}d"
-            days_color  = ACCENT if highlight else TEXT_2
+            highlight = r["days"] <= 7
+            date_str = r["date"].strftime("%b %d, %Y")
+            days_str = f"{r['days']} days"
             eps_str = "—"
             try: eps_str = f"${float(r['eps_est']):.2f}"
             except Exception: pass
 
-            def _item(txt: str, color: str, bold: bool = False, center: bool = True) -> QTableWidgetItem:
-                it = QTableWidgetItem(txt)
-                it.setForeground(QColor(color))
-                if center:
-                    it.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                if bold:
-                    from PyQt6.QtGui import QFont
-                    f = it.font(); f.setBold(True); it.setFont(f)
-                if highlight:
-                    it.setBackground(QColor(0, 200, 150, 30))
-                return it
+            # Row frame
+            if highlight:
+                bg = "rgba(212,168,67,0.06)"
+                border_style = f"border-left: 3px solid {ACCENT};"
+            else:
+                bg = SURFACE_2 if row_idx % 2 == 0 else SURFACE_1
+                border_style = ""
 
-            self._table.setItem(row_idx, 0, _item(r["ticker"],   ACCENT,     bold=True))
-            self._table.setItem(row_idx, 1, _item(date_str,      TEXT_1))
-            self._table.setItem(row_idx, 2, _item(days_str,      days_color, bold=highlight))
-            self._table.setItem(row_idx, 3, _item(eps_str,       TEXT_2))
-            self._table.setItem(row_idx, 4, _item(_fmt_rev(r["rev_est"]), TEXT_2))
+            row = QFrame()
+            row.setStyleSheet(
+                f"QFrame {{ background-color: {bg}; border-radius: 12px; {border_style} }}"
+                f"QFrame:hover {{ background-color: {SURFACE_3}; }}"
+            )
+
+            h = QHBoxLayout(row)
+            h.setContentsMargins(20, 14, 20, 14)
+            h.setSpacing(20)
+
+            # Ticker
+            ticker_lbl = QLabel(r["ticker"])
+            ticker_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 14px; font-weight: 700; background: transparent; min-width: 60px;")
+
+            # Date
+            date_lbl = QLabel(date_str)
+            date_lbl.setStyleSheet(f"color: {TEXT_2}; font-size: 13px; background: transparent;")
+
+            # Days-until badge
+            if highlight:
+                badge_bg = f"rgba(212,168,67,0.12)"
+                badge_color = ACCENT
+            else:
+                badge_bg = SURFACE_3
+                badge_color = TEXT_2
+            days_badge = QLabel(days_str)
+            days_badge.setStyleSheet(
+                f"padding: 4px 12px; background: {badge_bg}; border-radius: 8px;"
+                f"font-size: 12px; color: {badge_color}; font-weight: 600;"
+            )
+
+            # EPS estimate
+            eps_col = QVBoxLayout()
+            eps_col.setSpacing(0)
+            eps_hdr = QLabel("EPS Est.")
+            eps_hdr.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent;")
+            eps_hdr.setAlignment(Qt.AlignmentFlag.AlignRight)
+            eps_val = QLabel(eps_str)
+            eps_val.setStyleSheet(f"color: {TEXT_1}; font-size: 13px; font-weight: 600; background: transparent;")
+            eps_val.setAlignment(Qt.AlignmentFlag.AlignRight)
+            eps_col.addWidget(eps_hdr)
+            eps_col.addWidget(eps_val)
+            eps_widget = QWidget()
+            eps_widget.setFixedWidth(80)
+            eps_widget.setLayout(eps_col)
+            eps_widget.setStyleSheet("background: transparent;")
+
+            # Revenue estimate
+            rev_col = QVBoxLayout()
+            rev_col.setSpacing(0)
+            rev_hdr = QLabel("Rev Est.")
+            rev_hdr.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent;")
+            rev_hdr.setAlignment(Qt.AlignmentFlag.AlignRight)
+            rev_val = QLabel(_fmt_rev(r["rev_est"]))
+            rev_val.setStyleSheet(f"color: {TEXT_1}; font-size: 13px; font-weight: 600; background: transparent;")
+            rev_val.setAlignment(Qt.AlignmentFlag.AlignRight)
+            rev_col.addWidget(rev_hdr)
+            rev_col.addWidget(rev_val)
+            rev_widget = QWidget()
+            rev_widget.setFixedWidth(80)
+            rev_widget.setLayout(rev_col)
+            rev_widget.setStyleSheet("background: transparent;")
+
+            h.addWidget(ticker_lbl)
+            h.addWidget(date_lbl, stretch=1)
+            h.addWidget(days_badge)
+            h.addWidget(eps_widget)
+            h.addWidget(rev_widget)
+
+            self._rows_layout.addWidget(row)
 
         self._refresh_btn.setEnabled(True)
