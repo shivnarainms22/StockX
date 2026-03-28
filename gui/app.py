@@ -7,17 +7,59 @@ from __future__ import annotations
 import asyncio
 import os
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 from PyQt6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow, QStackedWidget,
     QVBoxLayout, QWidget,
 )
 
-from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtGui import QKeySequence, QShortcut, QIcon, QPixmap, QPainter, QColor, QPen, QBrush
 
 from gui.state import AppState
 from gui.theme import ACCENT, BORDER_SUBTLE, SURFACE_1, TEXT_1, TEXT_2
 from services.monitor import run_monitor
+
+
+def _make_window_icon() -> QIcon:
+    """Build a branded icon: dark background + ascending green bar chart.
+    Saves to data/icon.ico so Windows taskbar can load it as a native icon file."""
+    from pathlib import Path
+
+    size = 256
+    pix = QPixmap(size, size)
+    pix.fill(QColor(0, 0, 0, 0))  # transparent base
+
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    # Dark rounded background
+    p.setBrush(QBrush(QColor("#0B0F1A")))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawRoundedRect(0, 0, size, size, 40, 40)
+
+    # 4 ascending bars: (x, width, height)
+    accent = QColor("#00C896")
+    p.setBrush(QBrush(accent))
+    bars = [(28, 42, 76), (84, 42, 118), (140, 42, 158), (196, 42, 200)]
+    for bx, bw, bh in bars:
+        p.drawRoundedRect(bx, size - bh - 18, bw, bh, 7, 7)
+
+    # Trend line connecting bar tops
+    pen = QPen(accent, 7)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    points = [QPoint(bx + bw // 2, size - bh - 18) for bx, bw, bh in bars]
+    for i in range(len(points) - 1):
+        p.drawLine(points[i], points[i + 1])
+
+    p.end()
+
+    # Save as .ico so Windows taskbar loads it as a native icon (most reliable)
+    ico_path = Path(__file__).parent.parent / "data" / "icon.ico"
+    ico_path.parent.mkdir(parents=True, exist_ok=True)
+    pix.save(str(ico_path), "ICO")
+
+    return QIcon(str(ico_path))
 
 
 # ── TopNavBar ────────────────────────────────────────────────────────────────
@@ -98,6 +140,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("StockX")
+        self.setWindowIcon(_make_window_icon())
         self.resize(1200, 800)
         self.setMinimumSize(900, 600)
 
