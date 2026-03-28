@@ -142,7 +142,15 @@ class AppState:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             self.history = data.get("history", [])
-            self.conversation = [Message(**m) for m in data.get("conversation", [])]
+            self.conversation = [
+                Message(
+                    id=m.get("id", str(uuid.uuid4())),
+                    role=m.get("role", "user"),
+                    content=m.get("content", ""),
+                    is_streaming=m.get("is_streaming", False),
+                )
+                for m in data.get("conversation", [])
+            ]
             return True
         except Exception:
             return False
@@ -228,14 +236,16 @@ class AppState:
         today = date.today().isoformat()
         if any(s["date"] == today for s in self.portfolio_snapshots):
             return
-        # Require live prices for all holdings — don't pollute the chart with avg_cost fallbacks
-        tickers = [h["ticker"] for h in self.portfolio]
-        if not all(t in prices for t in tickers):
+        # Only include holdings that have live prices; skip unavailable tickers
+        tickers = [h["ticker"] for h in self.portfolio if h["ticker"] in prices]
+        if not tickers:
             return
         total = 0.0
         dominant_currency = "USD"
         for h in self.portfolio:
             t = h["ticker"]
+            if t not in prices:
+                continue
             price = prices[t]
             total += price * h["qty"]
             if t in currencies:
@@ -244,10 +254,18 @@ class AppState:
             return
         snap = {"date": today, "value": round(total, 2), "currency": dominant_currency}
         self.portfolio_snapshots.append(snap)
+        # Cap at 730 entries (~2 years of daily snapshots); rewrite file when trimming
         _DATA_DIR.mkdir(parents=True, exist_ok=True)
         path = _DATA_DIR / "portfolio_snapshots.jsonl"
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(snap) + "\n")
+        if len(self.portfolio_snapshots) > 730:
+            self.portfolio_snapshots = self.portfolio_snapshots[-730:]
+            path.write_text(
+                "\n".join(json.dumps(s) for s in self.portfolio_snapshots) + "\n",
+                encoding="utf-8",
+            )
+        else:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(snap) + "\n")
 
     def detect_provider(self) -> str:
         """Return the name of the active LLM provider by inspecting env vars."""

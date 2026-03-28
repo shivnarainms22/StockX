@@ -103,6 +103,7 @@ class EarningsView(QWidget):
         import yfinance as yf
 
         self._refresh_btn.setEnabled(False)
+        self._refresh_btn.setText("Loading…")
         # Clear existing rows
         while self._rows_layout.count():
             child = self._rows_layout.takeAt(0)
@@ -120,6 +121,7 @@ class EarningsView(QWidget):
             self._status_lbl.setText("Add tickers to Watchlist or Portfolio to see earnings")
             self._status_lbl.setVisible(True)
             self._refresh_btn.setEnabled(True)
+            self._refresh_btn.setText("Refresh")
             return
 
         def _fetch_all():
@@ -171,6 +173,7 @@ class EarningsView(QWidget):
             self._status_lbl.setText("No upcoming earnings data available")
             self._status_lbl.setVisible(True)
             self._refresh_btn.setEnabled(True)
+            self._refresh_btn.setText("Refresh")
             return
 
         def _fmt_rev(v) -> str:
@@ -188,15 +191,19 @@ class EarningsView(QWidget):
                 child.widget().deleteLater()
 
         for row_idx, r in enumerate(rows):
+            imminent  = 0 <= r["days"] <= 3   # very soon — extra prominent
             highlight = r["days"] <= 7
             date_str = r["date"].strftime("%b %d, %Y")
-            days_str = f"{r['days']} days"
+            days_str = f"{r['days']}d" if imminent else f"{r['days']} days"
             eps_str = "—"
             try: eps_str = f"${float(r['eps_est']):.2f}"
             except Exception: pass
 
             # Row frame
-            if highlight:
+            if imminent:
+                bg = "rgba(255, 165, 0, 0.08)"
+                border_style = "border-left: 3px solid #FFA500;"
+            elif highlight:
                 bg = "rgba(212,168,67,0.06)"
                 border_style = f"border-left: 3px solid {ACCENT};"
             else:
@@ -221,9 +228,12 @@ class EarningsView(QWidget):
             date_lbl = QLabel(date_str)
             date_lbl.setStyleSheet(f"color: {TEXT_2}; font-size: 13px; background: transparent;")
 
-            # Days-until badge
-            if highlight:
-                badge_bg = f"rgba(212,168,67,0.12)"
+            # Days-until badge — orange for ≤3 days, accent for ≤7, muted otherwise
+            if imminent:
+                badge_bg = "rgba(255, 165, 0, 0.20)"
+                badge_color = "#FFA500"
+            elif highlight:
+                badge_bg = "rgba(212,168,67,0.12)"
                 badge_color = ACCENT
             else:
                 badge_bg = SURFACE_3
@@ -275,3 +285,4 @@ class EarningsView(QWidget):
             self._rows_layout.addWidget(row)
 
         self._refresh_btn.setEnabled(True)
+        self._refresh_btn.setText("Refresh")

@@ -422,11 +422,11 @@ def _fetch_macro() -> dict:
         t10 = yf.Ticker("^TNX").history(period="5d")
         t2  = yf.Ticker("^IRX").history(period="5d")
         y10 = float(t10["Close"].iloc[-1]) if not t10.empty else None
-        y2  = float(t2["Close"].iloc[-1])  / 100 if not t2.empty else None   # ^IRX is in %
-        if y10 and y2:
+        y2  = float(t2["Close"].iloc[-1]) if not t2.empty else None   # both ^TNX and ^IRX quote in % points
+        if y10 is not None and y2 is not None:
             result["yield_10y"] = y10
-            result["yield_2y"]  = y2 * 100
-            result["yield_spread"] = y10 - (y2 * 100)
+            result["yield_2y"]  = y2
+            result["yield_spread"] = y10 - y2
         else:
             result["yield_10y"] = y10
             result["yield_2y"]  = None

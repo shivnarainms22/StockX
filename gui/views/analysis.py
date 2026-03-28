@@ -576,17 +576,23 @@ class AnalysisView(QWidget):
         if not self._state.conversation:
             self._mw.show_status("Nothing to export.", 3000)
             return
-        _EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filepath = _EXPORTS_DIR / f"analysis_{ts}.md"
-        lines = [f"# StockX Analysis\n_Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_\n\n---\n"]
-        for msg in self._state.conversation:
-            if msg.role == "user":
-                lines.append(f"\n**You:** {msg.content}\n")
-            else:
-                lines.append(f"\n**StockX:** {msg.content}\n\n---\n")
-        filepath.write_text("\n".join(lines), encoding="utf-8")
-        self._mw.show_status(f"Exported to data/exports/analysis_{ts}.md", 5000)
+        self._export_btn.setEnabled(False)
+        self._export_btn.setText("Exporting…")
+        try:
+            _EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = _EXPORTS_DIR / f"analysis_{ts}.md"
+            lines = [f"# StockX Analysis\n_Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_\n\n---\n"]
+            for msg in self._state.conversation:
+                if msg.role == "user":
+                    lines.append(f"\n**You:** {msg.content}\n")
+                else:
+                    lines.append(f"\n**StockX:** {msg.content}\n\n---\n")
+            filepath.write_text("\n".join(lines), encoding="utf-8")
+            self._mw.show_status(f"Exported to data/exports/analysis_{ts}.md", 5000)
+        finally:
+            self._export_btn.setEnabled(True)
+            self._export_btn.setText("Export")
 
     def _resume_session(self) -> None:
         """Reload persisted session into the chat view (item 1)."""
@@ -601,6 +607,8 @@ class AnalysisView(QWidget):
         if not self._state.conversation:
             self._mw.show_status("Nothing to export.", 3000)
             return
+        self._pdf_btn.setEnabled(False)
+        self._pdf_btn.setText("Exporting…")
         try:
             from PyQt6.QtPrintSupport import QPrinter
             from PyQt6.QtGui import QTextDocument
@@ -629,6 +637,9 @@ class AnalysisView(QWidget):
             self._mw.show_status(f"PDF saved → {path}", 5000)
         except Exception as exc:
             self._mw.show_status(f"PDF export failed: {exc}", 5000)
+        finally:
+            self._pdf_btn.setEnabled(True)
+            self._pdf_btn.setText("PDF")
 
     def _insert_score_card(self, data: dict) -> None:
         """Insert a compact score card widget into the chat layout (item 3)."""

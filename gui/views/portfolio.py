@@ -40,6 +40,9 @@ class PortfolioView(QWidget):
         self._update_summary()
         self._build_rows()
         self._update_chart()
+        # Load dividend data in background on startup
+        if self._state.portfolio:
+            asyncio.get_event_loop().create_task(self._load_dividends_quietly())
 
     # ── UI construction ───────────────────────────────────────────────────
 
@@ -226,9 +229,15 @@ class PortfolioView(QWidget):
             code, (val, cost) = next(iter(by_currency.items()))
             pnl  = val - cost
             sign = "+" if pnl >= 0 else ""
+            pnl_color = POSITIVE if pnl >= 0 else NEGATIVE
+            pnl_pct  = (pnl / cost * 100) if cost else 0.0
             self._total_value_txt.setText(fmt_price(val, code))
             self._pnl_dollar_txt.setText(f"{sign}{fmt_price(pnl, code)}")
+            self._pnl_pct_txt.setText(f"({sign}{pnl_pct:.2f}%)")
+            self._pnl_dollar_txt.setStyleSheet(f"color: {pnl_color}; font-size: 18px; font-weight: 700; background: transparent;")
+            self._pnl_pct_txt.setStyleSheet(f"color: {pnl_color}; font-size: 13px; background: transparent;")
         else:
+            # Multi-currency: show per-currency values; no cross-currency total %
             val_parts = "  ".join(fmt_price(v, c) for c, (v, _) in by_currency.items())
             pnl_parts = []
             for c, (v, co) in by_currency.items():
@@ -236,16 +245,9 @@ class PortfolioView(QWidget):
                 pnl_parts.append(f"{s}{fmt_price(p, c)}")
             self._total_value_txt.setText(val_parts)
             self._pnl_dollar_txt.setText("  ".join(pnl_parts))
-
-        total_val  = sum(v for v, _ in by_currency.values())
-        total_cost = sum(c for _, c in by_currency.values())
-        pnl_overall = total_val - total_cost
-        pnl_pct  = (pnl_overall / total_cost * 100) if total_cost else 0.0
-        pnl_color = POSITIVE if pnl_overall >= 0 else NEGATIVE
-        sign = "+" if pnl_overall >= 0 else ""
-        self._pnl_pct_txt.setText(f"({sign}{pnl_pct:.2f}%)")
-        self._pnl_dollar_txt.setStyleSheet(f"color: {pnl_color}; font-size: 18px; font-weight: 700; background: transparent;")
-        self._pnl_pct_txt.setStyleSheet(f"color: {pnl_color}; font-size: 13px; background: transparent;")
+            self._pnl_pct_txt.setText("(mixed currencies)")
+            self._pnl_dollar_txt.setStyleSheet(f"color: {TEXT_1}; font-size: 18px; font-weight: 700; background: transparent;")
+            self._pnl_pct_txt.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px; background: transparent;")
 
     def _build_rows(self) -> None:
         while self._rows_layout.count():
@@ -352,10 +354,37 @@ class PortfolioView(QWidget):
             self._div_income_txt.setText("—")
 
     def _remove_holding(self, ticker: str) -> None:
-        self._state.portfolio = [x for x in self._state.portfolio if x["ticker"] != ticker]
-        self._state.save_portfolio()
-        self._update_summary()
-        self._build_rows()
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Confirm Remove")
+        dlg.setMinimumWidth(280)
+        dlg.setStyleSheet("QDialog { background-color: #161618; }")
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        lbl = QLabel(f"Remove <b>{ticker}</b> from portfolio?")
+        lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 14px;")
+        btn_row = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dlg.close)
+        del_btn = QPushButton("Remove")
+        del_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {NEGATIVE}; color: #fff; border: none;"
+            f"border-radius: 8px; padding: 6px 16px; font-size: 13px; font-weight: 600; }}"
+            f"QPushButton:hover {{ background-color: #e05555; }}"
+        )
+        def _do_remove() -> None:
+            self._state.portfolio = [x for x in self._state.portfolio if x["ticker"] != ticker]
+            self._state.save_portfolio()
+            self._update_summary()
+            self._build_rows()
+            dlg.close()
+        del_btn.clicked.connect(_do_remove)
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(del_btn)
+        layout.addWidget(lbl)
+        layout.addLayout(btn_row)
+        dlg.show()
 
     def _update_chart(self) -> None:
         snaps = self._state.portfolio_snapshots
@@ -382,9 +411,29 @@ class PortfolioView(QWidget):
 
     # ── Refresh ───────────────────────────────────────────────────────────
 
+    async def _load_dividends_quietly(self) -> None:
+        """Load TTM dividend data on startup without triggering a full price refresh."""
+        tickers = list({h["ticker"] for h in self._state.portfolio})
+        for ticker in tickers:
+            try:
+                def _fetch_div(t: str) -> float:
+                    import yfinance as yf
+                    import pandas as pd
+                    divs = yf.Ticker(t).dividends
+                    cutoff = pd.Timestamp.now() - pd.DateOffset(years=1)
+                    return float(divs[divs.index >= cutoff].sum())
+                ttm = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda t=ticker: _fetch_div(t)
+                )
+                self._dividends[ticker] = ttm
+            except Exception:
+                self._dividends[ticker] = 0.0
+        self._update_dividend_income()
+
     async def _refresh(self, _e=None) -> None:
         import yfinance as yf
         self._refresh_btn.setEnabled(False)
+        self._refresh_btn.setText("Refreshing…")
         tickers = list({h["ticker"] for h in self._state.portfolio})
 
         for ticker in tickers:
@@ -448,6 +497,7 @@ class PortfolioView(QWidget):
         self._state.save_portfolio_snapshot(self._prices, self._currencies)
         self._update_chart()
         self._refresh_btn.setEnabled(True)
+        self._refresh_btn.setText("Refresh Prices")
 
     # ── Add holding dialog ────────────────────────────────────────────────
 

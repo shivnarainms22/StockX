@@ -180,6 +180,7 @@ class NewsView(QWidget):
         import yfinance as yf
 
         self._refresh_btn.setEnabled(False)
+        self._refresh_btn.setText("Loading…")
         self._clear_cards()
 
         tickers = [item["ticker"] for item in self._state.watchlist]
@@ -189,6 +190,7 @@ class NewsView(QWidget):
             lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px; font-style: italic;")
             self._body_layout.addWidget(lbl)
             self._refresh_btn.setEnabled(True)
+            self._refresh_btn.setText("Refresh")
             return
 
         # Loading indicator
@@ -263,3 +265,4 @@ class NewsView(QWidget):
                 self._body_layout.addWidget(card, i // 2, i % 2)
 
         self._refresh_btn.setEnabled(True)
+        self._refresh_btn.setText("Refresh")

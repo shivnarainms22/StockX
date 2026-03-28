@@ -48,8 +48,10 @@ SECTOR_ETFS: dict[str, str] = {
 _COLS = 3  # cells per row
 
 
-def _change_color(pct: float) -> tuple[str, str]:
-    """Return (background_rgba, text_color) for a % change value."""
+def _change_color(pct: float | None) -> tuple[str, str]:
+    """Return (background_rgba, text_color) for a % change value. None = data unavailable."""
+    if pct is None:
+        return "rgba(30, 45, 66, 0.30)", TEXT_MUTED
     if pct >= 2.0:
         return "rgba(0, 212, 170, 0.35)", POSITIVE
     if pct >= 0.5:
@@ -58,7 +60,7 @@ def _change_color(pct: float) -> tuple[str, str]:
         return "rgba(255, 107, 107, 0.35)", NEGATIVE
     if pct <= -0.5:
         return "rgba(255, 107, 107, 0.18)", NEGATIVE
-    return f"rgba(30, 45, 66, 0.50)", TEXT_2
+    return "rgba(30, 45, 66, 0.50)", TEXT_2
 
 
 class _HeatCell(QFrame):
@@ -94,16 +96,19 @@ class _HeatCell(QFrame):
         layout.addStretch()
         layout.addWidget(self._pct_lbl)
 
-    def update_change(self, pct: float) -> None:
-        sign = "+" if pct >= 0 else ""
-        self._pct_lbl.setText(f"{sign}{pct:.2f}%")
+    def update_change(self, pct: float | None) -> None:
+        if pct is None:
+            self._pct_lbl.setText("—")
+        else:
+            sign = "+" if pct >= 0 else ""
+            self._pct_lbl.setText(f"{sign}{pct:.2f}%")
         self._apply_style(pct)
         _, txt_color = _change_color(pct)
         self._pct_lbl.setStyleSheet(
             f"font-size: 18px; font-weight: 700; color: {txt_color}; background: transparent;"
         )
 
-    def _apply_style(self, pct: float) -> None:
+    def _apply_style(self, pct: float | None) -> None:
         bg, _ = _change_color(pct)
         self.setStyleSheet(
             f"QFrame {{ background-color: {bg}; border: none; border-radius: 14px; }}"
@@ -221,7 +226,7 @@ class SectorHeatmapView(QWidget):
                     elif len(hist) == 1:
                         results[etf] = 0.0
                 except Exception:
-                    results[etf] = 0.0
+                    results[etf] = None   # None = fetch failed; distinct from 0.0 = flat day
             return results
 
         changes = await asyncio.get_event_loop().run_in_executor(None, _fetch_all)

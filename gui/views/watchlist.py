@@ -186,10 +186,11 @@ class WatchlistView(QWidget):
     def _make_row(self, item: dict, idx: int) -> QFrame:
         ticker = item["ticker"]
         live = self._live.get(ticker, {})
-        price_str = fmt_price(live["price"], live.get("currency")) if "price" in live else "\u2014"
+        has_error = live.get("error", False)
+        price_str = "\u26a0 unavailable" if has_error else (fmt_price(live["price"], live.get("currency")) if "price" in live else "\u2014")
         rsi_val = live.get("rsi")
-        rsi_str = f"{rsi_val:.1f}" if rsi_val is not None else "\u2014"
-        rsi_color = NEGATIVE if (rsi_val or 50) >= 70 else (POSITIVE if (rsi_val or 50) <= 30 else TEXT_1)
+        rsi_str = "\u2014" if has_error else (f"{rsi_val:.1f}" if rsi_val is not None else "\u2014")
+        rsi_color = TEXT_MUTED if has_error else (NEGATIVE if (rsi_val or 50) >= 70 else (POSITIVE if (rsi_val or 50) <= 30 else TEXT_1))
 
         bg = SURFACE_2 if idx % 2 == 0 else SURFACE_1
         row = QFrame()
@@ -222,7 +223,10 @@ class WatchlistView(QWidget):
 
         # Price + change
         change_val = live.get("change_pct")
-        if change_val is not None:
+        if has_error:
+            chg_color = TEXT_MUTED
+            chg_str = ""
+        elif change_val is not None:
             chg_sign = "+" if change_val >= 0 else ""
             chg_color = POSITIVE if change_val >= 0 else NEGATIVE
             chg_str = f"{chg_sign}{change_val:.2f}%"
@@ -233,7 +237,8 @@ class WatchlistView(QWidget):
         price_col = QVBoxLayout()
         price_col.setSpacing(1)
         price_lbl = QLabel(price_str)
-        price_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 15px; font-weight: 600; background: transparent;")
+        price_color = TEXT_MUTED if has_error else TEXT_1
+        price_lbl.setStyleSheet(f"color: {price_color}; font-size: 13px; font-weight: 600; background: transparent;")
         price_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         chg_lbl = QLabel(chg_str)
         chg_lbl.setStyleSheet(f"color: {chg_color}; font-size: 12px; font-weight: 500; background: transparent;")
@@ -428,6 +433,7 @@ class WatchlistView(QWidget):
     async def refresh(self, _e=None) -> None:
         import yfinance as yf
         self._refresh_btn.setEnabled(False)
+        self._refresh_btn.setText("Refreshing…")
         tickers = [item["ticker"] for item in self._state.watchlist]
 
         for ticker in tickers:
@@ -445,6 +451,7 @@ class WatchlistView(QWidget):
                     None, lambda t=ticker: _fetch(t)
                 )
                 if hist.empty:
+                    self._live[ticker] = {"error": True}
                     continue
                 price  = float(hist["Close"].iloc[-1])
                 delta  = hist["Close"].diff()
@@ -461,10 +468,11 @@ class WatchlistView(QWidget):
                     "change_pct": change_pct,
                 }
             except Exception:
-                pass
+                self._live[ticker] = {"error": True}
 
         self._build_rows()
         self._refresh_btn.setEnabled(True)
+        self._refresh_btn.setText("Refresh")
 
     # ── Add dialog ────────────────────────────────────────────────────────
 

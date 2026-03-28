@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QScrollArea, QSlider,
-    QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget, QSizePolicy,
 )
 
 from gui.state import AppState
@@ -55,21 +55,21 @@ class SettingsView(QWidget):
         body_layout.setSpacing(0)
 
         # ── API Keys card ─────────────────────────────────────────────────
-        self._nvidia_f    = self._key_field("NVIDIA API Key",    "NVIDIA_API_KEY")
-        self._anthropic_f = self._key_field("Anthropic API Key", "ANTHROPIC_API_KEY")
-        self._openai_f    = self._key_field("OpenAI API Key",    "OPENAI_API_KEY")
+        nvidia_row,    self._nvidia_f    = self._key_field("NVIDIA API Key",    "NVIDIA_API_KEY")
+        anthropic_row, self._anthropic_f = self._key_field("Anthropic API Key", "ANTHROPIC_API_KEY")
+        openai_row,    self._openai_f    = self._key_field("OpenAI API Key",    "OPENAI_API_KEY")
 
         body_layout.addWidget(self._section_card("LLM Providers", [
-            self._nvidia_f, self._anthropic_f, self._openai_f,
+            nvidia_row, anthropic_row, openai_row,
         ]))
         body_layout.addSpacing(16)
 
         # ── Search card ───────────────────────────────────────────────────
-        self._search_f = self._key_field("Search API Key", "SEARCH_API_KEY")
+        search_row, self._search_f = self._key_field("Search API Key", "SEARCH_API_KEY")
 
         # _search_row_widget() sets self._provider_dd with proper item data
         body_layout.addWidget(self._section_card("Search", [
-            self._search_row_widget(), self._search_f,
+            self._search_row_widget(), search_row,
         ]))
         body_layout.addSpacing(16)
 
@@ -126,9 +126,22 @@ class SettingsView(QWidget):
         save_btn.setFixedHeight(38)
         save_btn.clicked.connect(lambda: asyncio.get_event_loop().create_task(self._save()))
 
+        self._test_btn = QPushButton("Test Connection")
+        self._test_btn.setFixedHeight(38)
+        self._test_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none;"
+            f"border-radius: 10px; padding: 6px 16px; font-size: 13px; }}"
+            f"QPushButton:hover {{ background: {SURFACE_3}; }}"
+            f"QPushButton:disabled {{ color: {TEXT_MUTED}; }}"
+        )
+        self._test_btn.clicked.connect(
+            lambda: asyncio.get_event_loop().create_task(self._test_connection())
+        )
+
         self._save_status = QLabel("")
         self._save_status.setStyleSheet(f"color: {TEXT_2}; font-size: 12px;")
         save_row.addWidget(save_btn)
+        save_row.addWidget(self._test_btn)
         save_row.addWidget(self._save_status)
         save_row.addStretch()
 
@@ -151,15 +164,38 @@ class SettingsView(QWidget):
         h.addStretch()
         return header
 
-    def _key_field(self, placeholder: str, env_key: str) -> QLineEdit:
+    def _key_field(self, placeholder: str, env_key: str) -> tuple[QWidget, QLineEdit]:
+        """Returns (row_widget, line_edit) — row has the field + show/hide toggle."""
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(6)
+
         field = QLineEdit()
         field.setPlaceholderText(placeholder)
         field.setText(os.environ.get(env_key, ""))
         field.setEchoMode(QLineEdit.EchoMode.Password)
 
-        # Show/hide toggle handled by wrapping in a container is complex;
-        # just provide the field — user can use eye button via system
-        return field
+        toggle_btn = QPushButton("Show")
+        toggle_btn.setCheckable(True)
+        toggle_btn.setFixedWidth(48)
+        toggle_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        toggle_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_MUTED}; background: transparent; border: none;"
+            f"font-size: 11px; padding: 0; }}"
+            f"QPushButton:hover {{ color: {TEXT_2}; }}"
+            f"QPushButton:checked {{ color: {ACCENT}; }}"
+        )
+
+        def _toggle(checked: bool) -> None:
+            field.setEchoMode(QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password)
+            toggle_btn.setText("Hide" if checked else "Show")
+
+        toggle_btn.toggled.connect(_toggle)
+        h.addWidget(field, stretch=1)
+        h.addWidget(toggle_btn)
+        return row, field
 
     def _search_row_widget(self) -> QWidget:
         w = QWidget()
@@ -219,6 +255,80 @@ class SettingsView(QWidget):
 
     def _on_slider_change(self, value: int) -> None:
         self._steps_lbl.setText(f"Max Steps: {value}")
+
+    async def _test_connection(self) -> None:
+        """Ping the active provider with a minimal 1-token request."""
+        import httpx
+
+        self._test_btn.setEnabled(False)
+        self._test_btn.setText("Testing…")
+        self._save_status.setText("")
+
+        provider = self._state.detect_provider()
+        nvidia_key     = self._nvidia_f.text().strip()
+        anthropic_key  = self._anthropic_f.text().strip()
+        openai_key     = self._openai_f.text().strip()
+
+        ok = False
+        detail = ""
+        try:
+            loop = asyncio.get_running_loop()
+            if "NVIDIA" in provider and nvidia_key:
+                def _ping_nvidia():
+                    r = httpx.post(
+                        "https://integrate.api.nvidia.com/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {nvidia_key}", "Content-Type": "application/json"},
+                        json={"model": "meta/llama-3.1-70b-instruct", "max_tokens": 1,
+                              "messages": [{"role": "user", "content": "hi"}]},
+                        timeout=10,
+                    )
+                    return r.status_code
+                status = await loop.run_in_executor(None, _ping_nvidia)
+                ok = status == 200
+                detail = f"NVIDIA ({status})"
+
+            elif "Anthropic" in provider and anthropic_key:
+                def _ping_anthropic():
+                    r = httpx.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01",
+                                 "content-type": "application/json"},
+                        json={"model": "claude-haiku-4-5-20251001", "max_tokens": 1,
+                              "messages": [{"role": "user", "content": "hi"}]},
+                        timeout=10,
+                    )
+                    return r.status_code
+                status = await loop.run_in_executor(None, _ping_anthropic)
+                ok = status == 200
+                detail = f"Anthropic ({status})"
+
+            elif "OpenAI" in provider and openai_key:
+                def _ping_openai():
+                    r = httpx.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+                        json={"model": "gpt-4o-mini", "max_tokens": 1,
+                              "messages": [{"role": "user", "content": "hi"}]},
+                        timeout=10,
+                    )
+                    return r.status_code
+                status = await loop.run_in_executor(None, _ping_openai)
+                ok = status == 200
+                detail = f"OpenAI ({status})"
+            else:
+                detail = "No provider configured — save API keys first"
+        except Exception as exc:
+            detail = str(exc)[:60]
+
+        if ok:
+            self._save_status.setText(f"Connected — {detail}")
+            self._save_status.setStyleSheet(f"color: {POSITIVE}; font-size: 12px;")
+        else:
+            self._save_status.setText(f"Failed — {detail}")
+            self._save_status.setStyleSheet(f"color: {NEGATIVE}; font-size: 12px;")
+
+        self._test_btn.setEnabled(True)
+        self._test_btn.setText("Test Connection")
 
     async def _save(self) -> None:
         from dotenv import set_key
