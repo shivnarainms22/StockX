@@ -103,6 +103,35 @@ def render_sparkline(prices: list[float], up: bool = True) -> bytes:
         return b""
 
 
+def render_commodity_sparkline(prices: list[float], up: bool = True,
+                               width: float = 1.8, height: float = 0.5) -> bytes:
+    """Render a slightly larger sparkline for commodity cards. Returns PNG bytes."""
+    if len(prices) < 2:
+        return b""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        color = POSITIVE if up else NEGATIVE
+        fig, ax = plt.subplots(figsize=(width, height), dpi=100)
+        fig.patch.set_facecolor("none")
+        ax.set_facecolor("none")
+
+        x = list(range(len(prices)))
+        ax.plot(x, prices, color=color, linewidth=1.5, solid_capstyle="round")
+        ax.axis("off")
+        plt.tight_layout(pad=0)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight", pad_inches=0)
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b""
+
+
 def render_pnl_chart(snapshots: list[dict]) -> bytes:
     """Render a % return chart normalised to first snapshot value."""
     if len(snapshots) < 2:

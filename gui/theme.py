@@ -25,6 +25,7 @@ BORDER_INPUT  = "#2C2C32"   # TextField default border
 
 POSITIVE      = "#34D399"   # Gain / oversold RSI (≤ 30) — emerald
 NEGATIVE      = "#FB7185"   # Loss / overbought RSI (≥ 70) — rose
+CAUTION       = "#D4A843"   # Warning / threshold breach — warm gold
 
 NAV_BG        = "#0A0A0C"   # Navigation rail background
 

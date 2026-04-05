@@ -63,6 +63,11 @@ class AppState:
     # Alert history: list of {"id", "ts", "ticker", "type", "message"}
     alert_history: list[dict] = field(default_factory=list)
 
+    # Commodity monitoring
+    commodity_alert_enabled: bool = True
+    commodity_alert_threshold: float = 3.0   # % daily move to trigger alert
+    last_commodity_prices: dict = field(default_factory=dict)  # {symbol: {price, ts}}
+
     def load_portfolio(self) -> None:
         path = _DATA_DIR / "portfolio.json"
         if path.exists():
@@ -266,6 +271,30 @@ class AppState:
         else:
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(snap) + "\n")
+
+    # ── Commodity state persistence ─────────────────────────────────────
+
+    def load_commodity_state(self) -> None:
+        path = _DATA_DIR / "commodity_state.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                self.last_commodity_prices = data.get("last_prices", {})
+                self.commodity_alert_enabled = data.get("alert_enabled", True)
+                self.commodity_alert_threshold = data.get("alert_threshold", 3.0)
+            except Exception:
+                pass
+
+    def save_commodity_state(self) -> None:
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+        (_DATA_DIR / "commodity_state.json").write_text(
+            json.dumps({
+                "last_prices": self.last_commodity_prices,
+                "alert_enabled": self.commodity_alert_enabled,
+                "alert_threshold": self.commodity_alert_threshold,
+            }, indent=2),
+            encoding="utf-8",
+        )
 
     def detect_provider(self) -> str:
         """Return the name of the active LLM provider by inspecting env vars."""

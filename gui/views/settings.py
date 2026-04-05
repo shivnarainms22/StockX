@@ -73,6 +73,12 @@ class SettingsView(QWidget):
         ]))
         body_layout.addSpacing(16)
 
+        # ── Research Data card ────────────────────────────────────────────
+        fred_row, self._fred_f = self._key_field("FRED API Key (free — stlouisfed.org)", "FRED_API_KEY")
+        eia_row,  self._eia_f  = self._key_field("EIA API Key (free — eia.gov)", "EIA_API_KEY")
+        body_layout.addWidget(self._section_card("Research Data", [fred_row, eia_row]))
+        body_layout.addSpacing(16)
+
         # ── Agent card ────────────────────────────────────────────────────
         slider_row = QHBoxLayout()
         slider_row.setSpacing(12)
@@ -117,6 +123,40 @@ class SettingsView(QWidget):
              ("30", "Every 30 minutes"), ("60", "Every 60 minutes")],
         )
         body_layout.addWidget(self._section_card("Alert Check Interval", [self._alert_interval_dd]))
+        body_layout.addSpacing(16)
+
+        # ── Commodity Alerts card ─────────────────────────────────────────
+        self._commodity_enabled_dd = QComboBox()
+        for key, text in [("true", "Enabled"), ("false", "Disabled")]:
+            self._commodity_enabled_dd.addItem(text, key)
+        if not self._state.commodity_alert_enabled:
+            self._commodity_enabled_dd.setCurrentIndex(1)
+
+        commodity_threshold_row = QWidget()
+        commodity_threshold_row.setStyleSheet("background: transparent;")
+        ct_h = QHBoxLayout(commodity_threshold_row)
+        ct_h.setContentsMargins(0, 0, 0, 0)
+        ct_h.setSpacing(12)
+
+        self._commodity_threshold_lbl = QLabel(
+            f"Threshold: {self._state.commodity_alert_threshold:.1f}%"
+        )
+        self._commodity_threshold_lbl.setStyleSheet(f"color: {TEXT_2}; font-size: 13px; min-width: 120px;")
+        self._commodity_threshold_slider = QSlider(Qt.Orientation.Horizontal)
+        self._commodity_threshold_slider.setMinimum(2)   # 1.0%
+        self._commodity_threshold_slider.setMaximum(20)  # 10.0%
+        self._commodity_threshold_slider.setValue(int(self._state.commodity_alert_threshold * 2))
+        self._commodity_threshold_slider.setTickInterval(1)
+        self._commodity_threshold_slider.valueChanged.connect(
+            lambda v: self._commodity_threshold_lbl.setText(f"Threshold: {v / 2:.1f}%")
+        )
+
+        ct_h.addWidget(self._commodity_threshold_slider, stretch=1)
+        ct_h.addWidget(self._commodity_threshold_lbl)
+
+        body_layout.addWidget(self._section_card("Commodity Alerts", [
+            self._commodity_enabled_dd, commodity_threshold_row,
+        ]))
         body_layout.addSpacing(16)
 
         # ── Save row ──────────────────────────────────────────────────────
@@ -345,6 +385,8 @@ class SettingsView(QWidget):
                 ("SEARCH_API_KEY",           self._search_f.text().strip()),
                 ("AGENT_MAX_STEPS",          str(self._steps_slider.value())),
                 ("AGENT_MAX_CONTEXT_TOKENS", self._context_f.text().strip() or "102400"),
+                ("FRED_API_KEY",            self._fred_f.text().strip()),
+                ("EIA_API_KEY",             self._eia_f.text().strip()),
             ]
 
             # Update alert interval on state immediately
@@ -352,6 +394,13 @@ class SettingsView(QWidget):
                 self._state.alert_interval_minutes = int(self._alert_interval_dd.currentData() or "15")
             except ValueError:
                 pass
+
+            # Update commodity alert settings
+            self._state.commodity_alert_enabled = (
+                self._commodity_enabled_dd.currentData() == "true"
+            )
+            self._state.commodity_alert_threshold = self._commodity_threshold_slider.value() / 2.0
+            self._state.save_commodity_state()
 
             # Update watchlist auto-refresh interval
             try:

@@ -14,6 +14,18 @@ from services.notifications import notify
 
 _EARNINGS_CHECK_INTERVAL = 3600  # 1 hour between earnings checks per ticker
 
+# Commodity futures tracked by the commodity monitor (flat list to avoid circular imports)
+_COMMODITY_SYMBOLS: list[tuple[str, str]] = [
+    ("WTI Crude",   "CL=F"),  ("Brent Crude", "BZ=F"),
+    ("Natural Gas", "NG=F"),  ("Heating Oil", "HO=F"),
+    ("Gold",        "GC=F"),  ("Silver",      "SI=F"),
+    ("Platinum",    "PL=F"),  ("Palladium",   "PA=F"),
+    ("Copper",      "HG=F"),  ("Aluminum",    "ALI=F"),
+    ("Wheat",       "ZW=F"),  ("Corn",        "ZC=F"),
+    ("Soybeans",    "ZS=F"),  ("Coffee",      "KC=F"),
+    ("Sugar",       "SB=F"),  ("Cotton",      "CT=F"),
+]
+
 
 async def run_monitor(state: AppState, show_alert: Callable[[str, str], None]) -> None:
     """Background loop: poll watchlist tickers and fire alerts on threshold breach."""
@@ -128,6 +140,70 @@ async def run_monitor(state: AppState, show_alert: Callable[[str, str], None]) -
                                     state.save_alert(ticker, "earnings", msg)
                                 except Exception:
                                     pass
+                    except Exception:
+                        pass
+
+            except Exception:
+                continue
+
+
+async def run_commodity_monitor(state: AppState, show_alert: Callable[[str, str], None]) -> None:
+    """Background loop: poll commodity futures and fire alerts on significant daily moves."""
+    import yfinance as yf
+    from datetime import date
+
+    _last_alerted: dict[str, float] = {}
+
+    while True:
+        interval_secs = max(state.alert_interval_minutes, 1) * 60
+        await asyncio.sleep(interval_secs)
+
+        if not state.commodity_alert_enabled:
+            continue
+
+        now = time.time()
+        threshold = state.commodity_alert_threshold
+
+        for name, symbol in _COMMODITY_SYMBOLS:
+            try:
+                hist = yf.Ticker(symbol).history(period="2d")
+                if hist is None or len(hist) < 2:
+                    continue
+                prev = float(hist["Close"].iloc[-2])
+                curr = float(hist["Close"].iloc[-1])
+                if prev == 0:
+                    continue
+                pct = (curr - prev) / prev * 100
+
+                if abs(pct) >= threshold:
+                    key = f"{symbol}|commodity|{date.today().isoformat()}"
+                    if key in _last_alerted:
+                        continue
+                    _last_alerted[key] = now
+
+                    sign = "+" if pct >= 0 else ""
+                    msg = f"{name} ({symbol}) moved {sign}{pct:.1f}% today"
+
+                    # Check if any portfolio holdings are affected
+                    portfolio_tickers = {h["ticker"] for h in state.portfolio}
+                    # Inline sector map for monitor (avoids importing from gui)
+                    _AFFECTED: dict[str, list[str]] = {
+                        "CL=F": ["XLE", "CVX", "XOM", "COP", "OXY", "JETS", "DAL"],
+                        "BZ=F": ["XLE", "CVX", "XOM", "BP", "SHEL"],
+                        "NG=F": ["UNG", "LNG", "AR", "EQT", "MOS", "NTR"],
+                        "GC=F": ["GLD", "GDX", "NEM", "GOLD"],
+                        "HG=F": ["FCX", "SCCO", "TECK"],
+                        "ZW=F": ["ADM", "BG", "DE"],
+                    }
+                    affected = _AFFECTED.get(symbol, [])
+                    matches = [t for t in affected if t in portfolio_tickers]
+                    if matches:
+                        msg += f" -- your holdings: {', '.join(matches)}"
+
+                    show_alert(symbol, msg)
+                    notify(f"StockX \u2014 {name}", msg)
+                    try:
+                        state.save_alert(symbol, "commodity_move", msg)
                     except Exception:
                         pass
 

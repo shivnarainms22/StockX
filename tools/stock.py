@@ -320,80 +320,17 @@ def _mcap(v: float | None) -> str:
 def _n(v: float | None, dec: int = 2) -> str:
     return f"{v:.{dec}f}" if v is not None else "N/A"
 
-# ── Technical indicator calculators ──────────────────────────────────────────
-
-def _calc_atr(hist: Any, period: int = 14) -> float:
-    high, low, close = hist["High"], hist["Low"], hist["Close"]
-    prev_close = close.shift(1)
-    tr = (high - low).combine(
-        (high - prev_close).abs(), max
-    ).combine((low - prev_close).abs(), max)
-    return float(tr.rolling(period).mean().iloc[-1])
-
-def _calc_adx(hist: Any, period: int = 14) -> tuple[float, float, float]:
-    """Returns (ADX, +DI, -DI)."""
-    high, low, close = hist["High"], hist["Low"], hist["Close"]
-    prev_high = high.shift(1); prev_low = low.shift(1); prev_close = close.shift(1)
-    up_move   = high - prev_high
-    down_move = prev_low - low
-    plus_dm  = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
-    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
-    tr = (high - low).combine((high - prev_close).abs(), max).combine((low - prev_close).abs(), max)
-    atr      = tr.ewm(span=period, adjust=False).mean()
-    plus_di  = 100 * plus_dm.ewm(span=period, adjust=False).mean() / atr
-    minus_di = 100 * minus_dm.ewm(span=period, adjust=False).mean() / atr
-    dx  = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
-    adx = dx.ewm(span=period, adjust=False).mean()
-    return float(adx.iloc[-1]), float(plus_di.iloc[-1]), float(minus_di.iloc[-1])
-
-def _calc_stochastic(hist: Any, k_period: int = 14, d_period: int = 3) -> tuple[float, float]:
-    low_min  = hist["Low"].rolling(k_period).min()
-    high_max = hist["High"].rolling(k_period).max()
-    k = 100 * (hist["Close"] - low_min) / (high_max - low_min)
-    d = k.rolling(d_period).mean()
-    return float(k.iloc[-1]), float(d.iloc[-1])
-
-def _calc_roc(hist: Any, period: int = 14) -> float:
-    close = hist["Close"]
-    return float((close.iloc[-1] - close.iloc[-period]) / close.iloc[-period] * 100) if len(hist) >= period else 0.0
-
-def _calc_obv(hist: Any) -> tuple[float, float]:
-    """Returns (latest OBV, OBV 20-day SMA). Positive divergence = bullish."""
-    close  = hist["Close"]
-    volume = hist["Volume"]
-    direction = close.diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
-    obv = (volume * direction).cumsum()
-    return float(obv.iloc[-1]), float(obv.rolling(20).mean().iloc[-1])
-
-def _calc_vwap(hist: Any) -> float:
-    """VWAP over the full dataset (used as trend reference)."""
-    typical = (hist["High"] + hist["Low"] + hist["Close"]) / 3
-    return float((typical * hist["Volume"]).sum() / hist["Volume"].sum())
-
-def _find_support_resistance(hist: Any, lookback: int = 60) -> tuple[float, float]:
-    """Find nearest support (recent swing low) and resistance (recent swing high)."""
-    recent = hist.tail(lookback)
-    current = float(hist["Close"].iloc[-1])
-    highs = recent["High"].values
-    lows  = recent["Low"].values
-    # Swing highs / lows: local peaks/troughs in a 5-bar window
-    swing_highs = [highs[i] for i in range(2, len(highs)-2)
-                   if highs[i] == max(highs[i-2:i+3])]
-    swing_lows  = [lows[i]  for i in range(2, len(lows)-2)
-                   if lows[i]  == min(lows[i-2:i+3])]
-    resistance = min((h for h in swing_highs if h > current), default=float(recent["High"].max()))
-    support    = max((l for l in swing_lows  if l < current), default=float(recent["Low"].min()))
-    return support, resistance
-
-def _calc_fibonacci(high: float, low: float) -> dict[str, float]:
-    rng = high - low
-    return {
-        "23.6%": high - 0.236 * rng,
-        "38.2%": high - 0.382 * rng,
-        "50.0%": high - 0.500 * rng,
-        "61.8%": high - 0.618 * rng,
-        "78.6%": high - 0.786 * rng,
-    }
+# ── Technical indicator calculators (shared module) ────────────────────────
+from services.indicators import (
+    calc_atr as _calc_atr,
+    calc_adx as _calc_adx,
+    calc_stochastic as _calc_stochastic,
+    calc_roc as _calc_roc,
+    calc_obv as _calc_obv,
+    calc_vwap as _calc_vwap,
+    find_support_resistance as _find_support_resistance,
+    calc_fibonacci as _calc_fibonacci,
+)
 
 # ── Macro context (TTL cache — refreshes every 5 minutes) ────────────────────
 _macro_cache: dict | None = None

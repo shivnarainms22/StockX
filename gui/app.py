@@ -17,7 +17,7 @@ from PyQt6.QtGui import QKeySequence, QShortcut, QIcon, QPixmap, QPainter, QColo
 
 from gui.state import AppState
 from gui.theme import ACCENT, BORDER_SUBTLE, SURFACE_1, TEXT_1, TEXT_2
-from services.monitor import run_monitor
+from services.monitor import run_commodity_monitor, run_monitor
 
 
 def _make_window_icon() -> QIcon:
@@ -69,7 +69,7 @@ class TopNavBar(QFrame):
 
     nav_changed = pyqtSignal(int)
 
-    _TAB_LABELS = ["Analysis", "Watchlist", "Portfolio", "News", "Earnings", "Markets", "Settings"]
+    _TAB_LABELS = ["Analysis", "Watchlist", "Portfolio", "News", "Earnings", "Markets", "Macro", "Settings"]
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -151,6 +151,7 @@ class MainWindow(QMainWindow):
         self._state.load_analysis_history()
         self._state.load_portfolio_snapshots()
         self._state.load_alert_history()
+        self._state.load_commodity_state()
         try:
             self._state.watchlist_refresh_interval = int(
                 os.environ.get("WATCHLIST_REFRESH_INTERVAL", "0")
@@ -179,6 +180,7 @@ class MainWindow(QMainWindow):
         from gui.views.news      import NewsView
         from gui.views.earnings  import EarningsView
         from gui.views.heatmap   import SectorHeatmapView
+        from gui.views.macro     import MacroView
         from gui.views.settings  import SettingsView
 
         self._analysis_view  = AnalysisView(self._state, self)
@@ -187,17 +189,18 @@ class MainWindow(QMainWindow):
         self._news_view      = NewsView(self._state, self)
         self._earnings_view  = EarningsView(self._state, self)
         self._heatmap_view   = SectorHeatmapView(self._state, self)
+        self._macro_view     = MacroView(self._state, self)
         self._settings_view  = SettingsView(self._state, self)
 
         for view in [
             self._analysis_view, self._watchlist_view, self._portfolio_view,
             self._news_view, self._earnings_view,
-            self._heatmap_view, self._settings_view,
+            self._heatmap_view, self._macro_view, self._settings_view,
         ]:
             self._stack.addWidget(view)
 
-        # ── Keyboard shortcuts — Ctrl+1…7 switch views ──────────
-        for i in range(7):
+        # ── Keyboard shortcuts — Ctrl+1…8 switch views ──────────
+        for i in range(8):
             QShortcut(QKeySequence(f"Ctrl+{i+1}"), self).activated.connect(
                 lambda _=False, idx=i: self._topbar.set_active(idx)
             )
@@ -211,6 +214,7 @@ class MainWindow(QMainWindow):
         self._bg_tasks = [
             asyncio.ensure_future(self._init_agent()),
             asyncio.ensure_future(run_monitor(self._state, self._show_alert)),
+            asyncio.ensure_future(run_commodity_monitor(self._state, self._show_alert)),
             asyncio.ensure_future(self._auto_refresh_loop()),
         ]
 
@@ -223,6 +227,10 @@ class MainWindow(QMainWindow):
         self._topbar.set_active(0)
         self._stack.setCurrentIndex(0)
         self._analysis_view.set_input(prefill)
+
+    def switch_to_macro(self) -> None:
+        self._topbar.set_active(6)
+        self._stack.setCurrentIndex(6)
 
     # ── Theme ─────────────────────────────────────────────────────────────
 

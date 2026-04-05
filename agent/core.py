@@ -219,21 +219,25 @@ class AgentCore:
         task: str,
         history: list[dict[str, str]] | None = None,
         on_chunk: Callable[[str], None] | None = None,
+        skip_memory: bool = False,
     ) -> str:
         """
         Run a task through the ReAct loop.
 
         Args:
-            task:     The task/question from the user.
-            history:  Optional prior conversation messages to prepend
-                      (accumulated across chat turns in chat_mode).
-            on_chunk: Optional callback for streaming LLM output chunks.
-                      When provided, chunks are passed to the callback as
-                      they arrive and the step counter is suppressed.
+            task:        The task/question from the user.
+            history:     Optional prior conversation messages to prepend
+                         (accumulated across chat turns in chat_mode).
+            on_chunk:    Optional callback for streaming LLM output chunks.
+                         When provided, chunks are passed to the callback as
+                         they arrive and the step counter is suppressed.
+            skip_memory: If True, skip ChromaDB memory search. Use this when
+                         running from a background QThread to avoid onnxruntime
+                         thread-safety crashes on Python 3.13.
         """
         logger.info("Task: %s", task)
 
-        context_docs = await self.memory.search(task, top_k=3)
+        context_docs = [] if skip_memory else await self.memory.search(task, top_k=3)
         context_str = "\n".join(context_docs) if context_docs else ""
 
         system = SYSTEM_PROMPT.format(
