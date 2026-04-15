@@ -13,6 +13,9 @@ from services.notifications import notify
 
 
 _EARNINGS_CHECK_INTERVAL = 3600  # 1 hour between earnings checks per ticker
+_MIN_HISTORY_ROWS = 20
+_PRICE_FOLLOWTHROUGH_WINDOW_SECS = 45 * 60
+_MEANINGFUL_MOVE_PCT = 1.2
 
 # Commodity futures tracked by the commodity monitor (flat list to avoid circular imports)
 _COMMODITY_SYMBOLS: list[tuple[str, str]] = [
@@ -27,6 +30,30 @@ _COMMODITY_SYMBOLS: list[tuple[str, str]] = [
 ]
 
 
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _price_cross_confidence(price: float, threshold: float) -> float:
+    if threshold <= 0:
+        return 0.5
+    distance = abs(price - threshold) / threshold
+    return _clamp(0.55 + min(distance * 4.0, 0.35), 0.0, 0.95)
+
+
+def _rsi_confidence(rsi: float, threshold: float) -> float:
+    distance = abs(rsi - threshold) / 100.0
+    return _clamp(0.55 + min(distance * 2.0, 0.35), 0.0, 0.95)
+
+
+def _target_confidence(price: float, target: float) -> float:
+    if target <= 0:
+        return 0.5
+    distance = abs(price - target) / target
+    closeness = _clamp((0.02 - distance) / 0.02, 0.0, 1.0)
+    return _clamp(0.55 + closeness * 0.35, 0.0, 0.95)
+
+
 async def run_monitor(state: AppState, show_alert: Callable[[str, str], None]) -> None:
     """Background loop: poll watchlist tickers and fire alerts on threshold breach."""
     import yfinance as yf
@@ -34,6 +61,9 @@ async def run_monitor(state: AppState, show_alert: Callable[[str, str], None]) -
 
     # Tracks last time each condition fired: key = "TICKER|condition" -> epoch seconds
     _last_alerted: dict[str, float] = {}
+    # Track whether alerts led to meaningful follow-through moves.
+    # key -> (ticker, alert_type, trigger_price, trigger_ts)
+    _pending_precision: dict[str, tuple[str, str, float, float]] = {}
     # Earnings cache: {ticker: (check_ts, earnings_date_str)}
     _earnings_cache: dict[str, tuple[float, str]] = {}
 
@@ -56,54 +86,143 @@ async def run_monitor(state: AppState, show_alert: Callable[[str, str], None]) -
                 gains  = delta.clip(lower=0).rolling(14).mean()
                 losses = (-delta.clip(upper=0)).rolling(14).mean()
                 rsi    = float((100 - 100 / (1 + gains / losses)).iloc[-1])
+                history_ready = len(hist) >= _MIN_HISTORY_ROWS
+                base_confidence = 0.55 if history_ready else 0.45
+                min_confidence = float(item.get("min_confidence", state.default_alert_confidence))
+                cooldown_secs = max(
+                    int(item.get("alert_cooldown_minutes", state.default_alert_cooldown_minutes)),
+                    1,
+                ) * 60
+
+                # Evaluate old alerts for precision tracking once the window has elapsed.
+                for pending_key, pending in list(_pending_precision.items()):
+                    p_ticker, p_type, p_price, p_ts = pending
+                    if p_ticker != ticker or (now - p_ts) < _PRICE_FOLLOWTHROUGH_WINDOW_SECS:
+                        continue
+                    move_pct = abs((price - p_price) / p_price * 100) if p_price else 0.0
+                    state.record_alert_precision(p_type, move_pct >= _MEANINGFUL_MOVE_PCT)
+                    _pending_precision.pop(pending_key, None)
 
                 def _should_fire(condition_key: str) -> bool:
                     """Return True only if this condition hasn't fired within the current interval."""
                     last = _last_alerted.get(condition_key, 0.0)
-                    return (now - last) >= interval_secs
+                    return (now - last) >= max(interval_secs, cooldown_secs)
 
-                def _fire(condition_key: str, msg: str, alert_type: str = "price") -> None:
+                def _fire(
+                    condition_key: str,
+                    msg: str,
+                    alert_type: str = "price",
+                    *,
+                    confidence: float,
+                ) -> None:
                     _last_alerted[condition_key] = now
                     show_alert(ticker, msg)
                     notify(f"StockX \u2014 {ticker}", msg)
+                    _pending_precision[condition_key] = (ticker, alert_type, price, now)
                     try:
-                        state.save_alert(ticker, alert_type, msg)
+                        state.save_alert(
+                            ticker,
+                            alert_type,
+                            msg,
+                            confidence=round(confidence, 2),
+                            price=price,
+                        )
                     except Exception:
                         pass
 
                 if item.get("price_above") and price >= item["price_above"]:
+                    confidence = _clamp(
+                        base_confidence + (_price_cross_confidence(price, item["price_above"]) - 0.55),
+                        0.0,
+                        0.95,
+                    )
                     key = f"{ticker}|price_above"
-                    if _should_fire(key):
-                        _fire(key, f"{ticker} price ${price:.2f} \u2265 alert ${item['price_above']}", "price_above")
+                    if _should_fire(key) and confidence >= min_confidence:
+                        _fire(
+                            key,
+                            f"{ticker} price ${price:.2f} \u2265 alert ${item['price_above']}",
+                            "price_above",
+                            confidence=confidence,
+                        )
 
                 if item.get("price_below") and price <= item["price_below"]:
+                    confidence = _clamp(
+                        base_confidence + (_price_cross_confidence(price, item["price_below"]) - 0.55),
+                        0.0,
+                        0.95,
+                    )
                     key = f"{ticker}|price_below"
-                    if _should_fire(key):
-                        _fire(key, f"{ticker} price ${price:.2f} \u2264 alert ${item['price_below']}", "price_below")
+                    if _should_fire(key) and confidence >= min_confidence:
+                        _fire(
+                            key,
+                            f"{ticker} price ${price:.2f} \u2264 alert ${item['price_below']}",
+                            "price_below",
+                            confidence=confidence,
+                        )
 
                 if item.get("rsi_above") and rsi >= item["rsi_above"]:
+                    confidence = _clamp(
+                        base_confidence + (_rsi_confidence(rsi, item["rsi_above"]) - 0.55),
+                        0.0,
+                        0.95,
+                    )
                     key = f"{ticker}|rsi_above"
-                    if _should_fire(key):
-                        _fire(key, f"{ticker} RSI {rsi:.1f} \u2265 alert {item['rsi_above']}", "rsi_above")
+                    if _should_fire(key) and confidence >= min_confidence:
+                        _fire(
+                            key,
+                            f"{ticker} RSI {rsi:.1f} \u2265 alert {item['rsi_above']}",
+                            "rsi_above",
+                            confidence=confidence,
+                        )
 
                 if item.get("rsi_below") and rsi <= item["rsi_below"]:
+                    confidence = _clamp(
+                        base_confidence + (_rsi_confidence(rsi, item["rsi_below"]) - 0.55),
+                        0.0,
+                        0.95,
+                    )
                     key = f"{ticker}|rsi_below"
-                    if _should_fire(key):
-                        _fire(key, f"{ticker} RSI {rsi:.1f} \u2264 alert {item['rsi_below']}", "rsi_below")
+                    if _should_fire(key) and confidence >= min_confidence:
+                        _fire(
+                            key,
+                            f"{ticker} RSI {rsi:.1f} \u2264 alert {item['rsi_below']}",
+                            "rsi_below",
+                            confidence=confidence,
+                        )
 
                 # ── Price target proximity alerts (item 13) ────────────────
                 buy_target  = item.get("buy_target")
                 sell_target = item.get("sell_target")
                 if buy_target and price > 0:
                     if abs(price - buy_target) / buy_target <= 0.02:
+                        confidence = _clamp(
+                            base_confidence + (_target_confidence(price, buy_target) - 0.55),
+                            0.0,
+                            0.95,
+                        )
                         key = f"{ticker}|buy_target"
-                        if _should_fire(key):
-                            _fire(key, f"{ticker} near buy target ${buy_target:.2f} (current ${price:.2f})", "buy_target")
+                        if _should_fire(key) and confidence >= min_confidence:
+                            _fire(
+                                key,
+                                f"{ticker} near buy target ${buy_target:.2f} (current ${price:.2f})",
+                                "buy_target",
+                                confidence=confidence,
+                            )
                 if sell_target and price > 0:
                     if abs(price - sell_target) / sell_target <= 0.02:
+                        confidence = _clamp(
+                            base_confidence + (_target_confidence(price, sell_target) - 0.55),
+                            0.0,
+                            0.95,
+                        )
                         key = f"{ticker}|sell_target"
-                        if _should_fire(key):
-                            _fire(key, f"{ticker} near sell target ${sell_target:.2f} (current ${price:.2f})", "sell_target")
+                        if _should_fire(key) and confidence >= min_confidence:
+                            _fire(
+                                key,
+                                f"{ticker} near sell target ${sell_target:.2f} (current ${price:.2f})",
+                                "sell_target",
+                                confidence=confidence,
+                            )
 
                 # ── Earnings proximity alerts (item 14) ───────────────────
                 cached_ts, cached_ed = _earnings_cache.get(ticker, (0.0, ""))
@@ -137,7 +256,13 @@ async def run_monitor(state: AppState, show_alert: Callable[[str, str], None]) -
                                 show_alert(ticker, msg)
                                 notify(f"StockX \u2014 {ticker}", msg)
                                 try:
-                                    state.save_alert(ticker, "earnings", msg)
+                                    state.save_alert(
+                                        ticker,
+                                        "earnings",
+                                        msg,
+                                        confidence=_clamp(base_confidence, 0.0, 0.95),
+                                        price=price,
+                                    )
                                 except Exception:
                                     pass
                     except Exception:

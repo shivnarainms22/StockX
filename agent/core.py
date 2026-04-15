@@ -9,11 +9,13 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime
 from typing import Any, Callable
 
 from llm.router import LLMRouter
 from memory.store import MemoryStore
+from services.diagnostics import record_tool_call
 from tools.base import BaseTool
 from tools.search import SearchTool
 from tools.stock import StockTool
@@ -197,11 +199,13 @@ class AgentCore:
         self, tool: BaseTool, action_input: dict[str, Any]
     ) -> str:
         """Run a tool, retrying once after a 1-second delay on failure."""
+        start = time.perf_counter()
         try:
             result = await tool.run(action_input)
             # Also retry if the tool returned an error string
             if isinstance(result, str) and result.startswith("Error:"):
                 raise RuntimeError(result)
+            record_tool_call(tool.name, (time.perf_counter() - start) * 1000, ok=True)
             return str(result)
         except Exception as exc:
             logger.warning("Tool %s failed: %s — retrying in 1s", tool.name, exc)
@@ -209,9 +213,11 @@ class AgentCore:
             try:
                 result = await tool.run(action_input)
                 logger.info("Tool %s retry succeeded", tool.name)
+                record_tool_call(tool.name, (time.perf_counter() - start) * 1000, ok=True)
                 return str(result)
             except Exception as exc2:
                 logger.exception("Tool %s retry also failed", tool.name)
+                record_tool_call(tool.name, (time.perf_counter() - start) * 1000, ok=False)
                 return f"Tool error: {exc2}"
 
     async def run(

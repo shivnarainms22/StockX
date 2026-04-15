@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
@@ -19,8 +20,154 @@ if TYPE_CHECKING:
 # Mirror the sliding-window cap from main.py
 _MAX_HISTORY_EXCHANGES = 10
 _MAX_ANALYSIS_HISTORY  = 50
+_MAX_ALERT_HISTORY = 200
+_STATE_SCHEMA_VERSION = 2
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
+
+
+def _backup_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".bak")
+
+
+def _wrap_payload(data) -> dict:
+    return {
+        "_schema_version": _STATE_SCHEMA_VERSION,
+        "data": data,
+    }
+
+
+def _unwrap_payload(raw):
+    if isinstance(raw, dict) and "data" in raw and "_schema_version" in raw:
+        try:
+            version = int(raw.get("_schema_version", 1))
+        except Exception:
+            version = 1
+        return version, raw.get("data")
+    return 1, raw
+
+
+def _atomic_write_json(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    backup = _backup_path(path)
+
+    if path.exists():
+        try:
+            shutil.copy2(path, backup)
+        except Exception:
+            pass
+
+    text = json.dumps(data, indent=2, ensure_ascii=False)
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+
+
+def _load_json_with_backup(path: Path):
+    primary = path
+    backup = _backup_path(path)
+    parse_errors = 0
+
+    for candidate in (primary, backup):
+        if not candidate.exists():
+            continue
+        try:
+            data = json.loads(candidate.read_text(encoding="utf-8"))
+            if candidate == backup:
+                try:
+                    _atomic_write_json(primary, data)
+                except Exception:
+                    pass
+            return data
+        except Exception:
+            parse_errors += 1
+            continue
+
+    if parse_errors > 0:
+        return None
+    return None
+
+
+def _coerce_float(value, default: float | None = None) -> float | None:
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _coerce_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _migrate_watchlist(
+    data,
+    *,
+    default_cooldown: int,
+    default_confidence: float,
+) -> list[dict]:
+    if not isinstance(data, list):
+        return []
+    out: list[dict] = []
+    numeric_fields = (
+        "price_above",
+        "price_below",
+        "rsi_above",
+        "rsi_below",
+        "buy_target",
+        "sell_target",
+        "min_confidence",
+    )
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+        ticker = str(row.get("ticker", "")).strip().upper()
+        if not ticker:
+            continue
+        migrated = {"ticker": ticker}
+        for key in numeric_fields:
+            if key in row:
+                val = _coerce_float(row.get(key))
+                if val is not None:
+                    migrated[key] = val
+        migrated["alert_cooldown_minutes"] = max(
+            _coerce_int(row.get("alert_cooldown_minutes"), default_cooldown),
+            1,
+        )
+        migrated["min_confidence"] = min(
+            max(_coerce_float(row.get("min_confidence"), default_confidence) or default_confidence, 0.0),
+            1.0,
+        )
+        out.append(migrated)
+    return out
+
+
+def _migrate_alert_history(data) -> list[dict]:
+    if not isinstance(data, list):
+        return []
+    out: list[dict] = []
+    for row in data[:_MAX_ALERT_HISTORY]:
+        if not isinstance(row, dict):
+            continue
+        out.append(
+            {
+                "id": str(row.get("id") or uuid.uuid4()),
+                "ts": str(row.get("ts") or ""),
+                "ticker": str(row.get("ticker") or ""),
+                "type": str(row.get("type") or "price"),
+                "message": str(row.get("message") or ""),
+                "confidence": _coerce_float(row.get("confidence")),
+                "price": _coerce_float(row.get("price")),
+            }
+        )
+    return out
 
 
 @dataclass
@@ -43,6 +190,9 @@ class AppState:
 
     is_busy: bool = False
     agent_task: "asyncio.Task | None" = None
+    agent_init_in_progress: bool = False
+    agent_init_error: str = ""
+    agent_init_attempts: int = 0
 
     # Portfolio: list of {"ticker": str, "qty": float, "avg_cost": float}
     portfolio: list[dict] = field(default_factory=list)
@@ -67,34 +217,47 @@ class AppState:
     commodity_alert_enabled: bool = True
     commodity_alert_threshold: float = 3.0   # % daily move to trigger alert
     last_commodity_prices: dict = field(default_factory=dict)  # {symbol: {price, ts}}
+    default_alert_cooldown_minutes: int = 30
+    default_alert_confidence: float = 0.55
+    alert_precision_stats: dict[str, dict[str, int]] = field(default_factory=dict)
+
+    def _load_json_payload(self, filename: str):
+        path = _DATA_DIR / filename
+        raw = _load_json_with_backup(path)
+        if raw is None:
+            return None
+        _version, data = _unwrap_payload(raw)
+        return data
+
+    def _save_json_payload(self, filename: str, data) -> None:
+        path = _DATA_DIR / filename
+        _atomic_write_json(path, _wrap_payload(data))
 
     def load_portfolio(self) -> None:
-        path = _DATA_DIR / "portfolio.json"
-        if path.exists():
-            try:
-                self.portfolio = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                self.portfolio = []
+        data = self._load_json_payload("portfolio.json")
+        if isinstance(data, list):
+            self.portfolio = data
+        else:
+            self.portfolio = []
 
     def save_portfolio(self) -> None:
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        (_DATA_DIR / "portfolio.json").write_text(
-            json.dumps(self.portfolio, indent=2), encoding="utf-8"
-        )
+        self._save_json_payload("portfolio.json", self.portfolio)
 
     def load_watchlist(self) -> None:
-        path = _DATA_DIR / "watchlist.json"
-        if path.exists():
-            try:
-                self.watchlist = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                self.watchlist = []
+        data = self._load_json_payload("watchlist.json")
+        self.watchlist = _migrate_watchlist(
+            data,
+            default_cooldown=self.default_alert_cooldown_minutes,
+            default_confidence=self.default_alert_confidence,
+        )
 
     def save_watchlist(self) -> None:
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        (_DATA_DIR / "watchlist.json").write_text(
-            json.dumps(self.watchlist, indent=2), encoding="utf-8"
+        self.watchlist = _migrate_watchlist(
+            self.watchlist,
+            default_cooldown=self.default_alert_cooldown_minutes,
+            default_confidence=self.default_alert_confidence,
         )
+        self._save_json_payload("watchlist.json", self.watchlist)
 
     def add_display_user(self, text: str) -> Message:
         """Add a user message to the display conversation (not history yet)."""
@@ -126,7 +289,6 @@ class AppState:
 
     def save_session(self) -> None:
         """Persist current conversation + history to data/session.json."""
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
         session = {
             "history": self.history,
             "conversation": [
@@ -135,17 +297,14 @@ class AppState:
                 if not m.is_streaming
             ],
         }
-        (_DATA_DIR / "session.json").write_text(
-            json.dumps(session, indent=2), encoding="utf-8"
-        )
+        self._save_json_payload("session.json", session)
 
     def load_session(self) -> bool:
         """Load conversation + history from data/session.json. Returns True if found."""
-        path = _DATA_DIR / "session.json"
-        if not path.exists():
+        data = self._load_json_payload("session.json")
+        if not isinstance(data, dict):
             return False
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
             self.history = data.get("history", [])
             self.conversation = [
                 Message(
@@ -171,14 +330,18 @@ class AppState:
     # ── Alert history (item 15) ───────────────────────────────────────────
 
     def load_alert_history(self) -> None:
-        path = _DATA_DIR / "alert_history.json"
-        if path.exists():
-            try:
-                self.alert_history = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                self.alert_history = []
+        data = self._load_json_payload("alert_history.json")
+        self.alert_history = _migrate_alert_history(data)
 
-    def save_alert(self, ticker: str, alert_type: str, message: str) -> None:
+    def save_alert(
+        self,
+        ticker: str,
+        alert_type: str,
+        message: str,
+        *,
+        confidence: float | None = None,
+        price: float | None = None,
+    ) -> None:
         """Prepend an alert entry, cap at 200, and persist."""
         import datetime as _dt
         entry = {
@@ -187,24 +350,40 @@ class AppState:
             "ticker":  ticker,
             "type":    alert_type,
             "message": message,
+            "confidence": confidence,
+            "price": price,
         }
         self.alert_history.insert(0, entry)
-        if len(self.alert_history) > 200:
-            self.alert_history = self.alert_history[:200]
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        (_DATA_DIR / "alert_history.json").write_text(
-            json.dumps(self.alert_history, indent=2), encoding="utf-8"
-        )
+        if len(self.alert_history) > _MAX_ALERT_HISTORY:
+            self.alert_history = self.alert_history[:_MAX_ALERT_HISTORY]
+        self._save_json_payload("alert_history.json", self.alert_history)
+
+    def load_alert_metrics(self) -> None:
+        data = self._load_json_payload("alert_metrics.json")
+        if not isinstance(data, dict):
+            self.alert_precision_stats = {}
+            return
+        stats: dict[str, dict[str, int]] = {}
+        for key, row in data.items():
+            if not isinstance(row, dict):
+                continue
+            total = _coerce_int(row.get("total"), 0)
+            hits = _coerce_int(row.get("hits"), 0)
+            stats[str(key)] = {"total": max(total, 0), "hits": max(min(hits, total), 0)}
+        self.alert_precision_stats = stats
+
+    def record_alert_precision(self, alert_type: str, hit: bool) -> None:
+        row = self.alert_precision_stats.setdefault(alert_type, {"total": 0, "hits": 0})
+        row["total"] = int(row.get("total", 0)) + 1
+        if hit:
+            row["hits"] = int(row.get("hits", 0)) + 1
+        self._save_json_payload("alert_metrics.json", self.alert_precision_stats)
 
     # ── Analysis history ──────────────────────────────────────────────────
 
     def load_analysis_history(self) -> None:
-        path = _DATA_DIR / "analysis_history.json"
-        if path.exists():
-            try:
-                self.analysis_history = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                self.analysis_history = []
+        data = self._load_json_payload("analysis_history.json")
+        self.analysis_history = data if isinstance(data, list) else []
 
     def save_history_entry(self, query: str, response: str) -> None:
         entry = {
@@ -217,10 +396,7 @@ class AppState:
         self.analysis_history.insert(0, entry)
         if len(self.analysis_history) > _MAX_ANALYSIS_HISTORY:
             self.analysis_history = self.analysis_history[:_MAX_ANALYSIS_HISTORY]
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        (_DATA_DIR / "analysis_history.json").write_text(
-            json.dumps(self.analysis_history, indent=2), encoding="utf-8"
-        )
+        self._save_json_payload("analysis_history.json", self.analysis_history)
 
     # ── Portfolio snapshots ───────────────────────────────────────────────
 
@@ -275,25 +451,21 @@ class AppState:
     # ── Commodity state persistence ─────────────────────────────────────
 
     def load_commodity_state(self) -> None:
-        path = _DATA_DIR / "commodity_state.json"
-        if path.exists():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                self.last_commodity_prices = data.get("last_prices", {})
-                self.commodity_alert_enabled = data.get("alert_enabled", True)
-                self.commodity_alert_threshold = data.get("alert_threshold", 3.0)
-            except Exception:
-                pass
+        data = self._load_json_payload("commodity_state.json")
+        if not isinstance(data, dict):
+            return
+        self.last_commodity_prices = data.get("last_prices", {}) or {}
+        self.commodity_alert_enabled = bool(data.get("alert_enabled", True))
+        self.commodity_alert_threshold = float(data.get("alert_threshold", 3.0) or 3.0)
 
     def save_commodity_state(self) -> None:
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        (_DATA_DIR / "commodity_state.json").write_text(
-            json.dumps({
+        self._save_json_payload(
+            "commodity_state.json",
+            {
                 "last_prices": self.last_commodity_prices,
                 "alert_enabled": self.commodity_alert_enabled,
                 "alert_threshold": self.commodity_alert_threshold,
-            }, indent=2),
-            encoding="utf-8",
+            },
         )
 
     def detect_provider(self) -> str:

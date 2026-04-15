@@ -14,6 +14,7 @@ from urllib.parse import quote_plus
 
 import httpx
 
+from services.diagnostics import record_cache
 from tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ _TIMEOUT = httpx.Timeout(30.0)
 
 # ── Search result cache (item 2) ─────────────────────────────────────────────
 import time as _time
-_search_cache: dict[str, tuple[float, list]] = {}  # {query: (timestamp, results)}
+_search_cache: dict[str, tuple[float, list, bool]] = {}  # {query: (timestamp, results, used_fallback)}
 _SEARCH_TTL = 600  # 10 minutes
 
 _BRAVE_BASE  = "https://api.search.brave.com/res/v1/web/search"
@@ -67,13 +68,16 @@ class SearchTool(BaseTool):
         query = self._require(params, "query")
         num   = int(params.get("num_results", 5))
 
-        results = await self._fetch_results(query, num, api_key, provider)
+        results, used_fallback = await self._fetch_results(query, num, api_key, provider)
 
         if action == "summarise":
             if not results:
                 return f"No results found for: {query}"
             lines = [f"{r['title']}\n{r['snippet']}" for r in results if r.get("title") or r.get("snippet")]
-            return "\n\n".join(lines) if lines else f"No usable results for: {query}"
+            body = "\n\n".join(lines) if lines else f"No usable results for: {query}"
+            if used_fallback:
+                return "Degraded mode: search API unavailable, using fallback sources.\n\n" + body
+            return body
 
         # action == "search"
         if not results:
@@ -81,17 +85,22 @@ class SearchTool(BaseTool):
         lines = []
         for i, r in enumerate(results, 1):
             lines.append(f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet']}")
-        return "\n\n".join(lines)
+        body = "\n\n".join(lines)
+        if used_fallback:
+            return "Degraded mode: search API unavailable, using fallback sources.\n\n" + body
+        return body
 
     async def _fetch_results(
         self, query: str, num: int, api_key: str, provider: str
-    ) -> list[dict[str, str]]:
+    ) -> tuple[list[dict[str, str]], bool]:
         """Try configured API first, fall back to DuckDuckGo HTML scrape."""
         # Cache check (item 2)
         cache_key = f"{query}|{num}|{provider}"
         cached = _search_cache.get(cache_key)
         if cached and (_time.time() - cached[0]) < _SEARCH_TTL:
-            return cached[1]
+            record_cache("search", hit=True)
+            return cached[1], bool(cached[2])
+        record_cache("search", hit=False)
 
         if api_key and api_key not in _PLACEHOLDER_KEYS:
             try:
@@ -99,14 +108,14 @@ class SearchTool(BaseTool):
                     results = await self._fetch_tavily(query, num, api_key)
                 else:
                     results = await self._fetch_brave(query, num, api_key)
-                _search_cache[cache_key] = (_time.time(), results)
-                return results
+                _search_cache[cache_key] = (_time.time(), results, False)
+                return results, False
             except Exception as exc:
                 logger.warning("Search API (%s) failed: %s — falling back to DDG scrape", provider, exc)
 
         results = await self._fetch_ddg(query, num)
-        _search_cache[cache_key] = (_time.time(), results)
-        return results
+        _search_cache[cache_key] = (_time.time(), results, True)
+        return results, True
 
     async def _fetch_brave(self, query: str, num: int, api_key: str) -> list[dict[str, str]]:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:

@@ -8,9 +8,16 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from typing import Any, AsyncGenerator
 
 import httpx
+
+from services.diagnostics import (
+    record_provider_attempt,
+    record_provider_failure,
+    record_provider_success,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,19 +86,24 @@ class LLMRouter:
             )
 
         last_error: Exception | None = None
-        for name, fn, _ in providers:
+        for idx, (name, fn, _) in enumerate(providers):
+            start = time.perf_counter()
             try:
                 logger.info("Trying provider: %s", name)
+                record_provider_attempt(name)
                 result = await fn(
                     system=system,
                     messages=messages,
                     max_tokens=_MAX_OUTPUT[name],
                     temperature=temperature,
                 )
+                latency_ms = (time.perf_counter() - start) * 1000
+                record_provider_success(name, latency_ms, fallback_depth=idx)
                 logger.info("Provider %s succeeded", name)
                 return result
             except Exception as exc:
                 logger.warning("Provider %s failed: %s", name, exc)
+                record_provider_failure(name, str(exc))
                 last_error = exc
 
         raise RuntimeError(f"All LLM providers failed. Last error: {last_error}")
@@ -113,7 +125,8 @@ class LLMRouter:
             )
 
         last_error: Exception | None = None
-        for name, complete_fn, stream_fn in providers:
+        for idx, (name, complete_fn, stream_fn) in enumerate(providers):
+            start = time.perf_counter()
             gen = stream_fn(
                 system=system,
                 messages=messages,
@@ -122,11 +135,15 @@ class LLMRouter:
             )
             try:
                 logger.info("Streaming via provider: %s", name)
+                record_provider_attempt(name)
                 async for chunk in gen:
                     yield chunk
+                latency_ms = (time.perf_counter() - start) * 1000
+                record_provider_success(name, latency_ms, fallback_depth=idx)
                 return
             except Exception as exc:
                 logger.warning("Provider %s streaming failed: %s — trying next", name, exc)
+                record_provider_failure(name, str(exc))
                 last_error = exc
             finally:
                 await gen.aclose()

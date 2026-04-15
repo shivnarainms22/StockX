@@ -38,6 +38,19 @@ _FRED_SERIES: dict[str, str] = {
     "IRSTCI01INM156N":    "RBI Rate",
 }
 
+_FRED_UNITS: dict[str, str] = {
+    # Rates / spreads
+    "UNRATE": "%",
+    "FEDFUNDS": "%",
+    "T10Y2Y": "%",
+    "ECBDFR": "%",
+    "LRHUTTTTEZM156S": "%",
+    "IRSTCI01INM156N": "%",
+    # Index-style series
+    "DTWEXBGS": "index",
+    "MPMIEM3338M086S": "index",
+}
+
 
 def fetch_fred_indicators() -> dict[str, dict]:
     """Fetch latest FRED macro indicators. Returns {} if no API key or on error.
@@ -58,6 +71,7 @@ def fetch_fred_indicators() -> dict[str, dict]:
         import httpx
 
         results: dict[str, dict] = {}
+        fetched_ts = time.time()
         for series_id, name in _FRED_SERIES.items():
             try:
                 resp = httpx.get(
@@ -87,7 +101,9 @@ def fetch_fred_indicators() -> dict[str, dict]:
                     "value": float(value),
                     "previous": float(previous) if previous and previous != "." else None,
                     "date": latest.get("date", ""),
-                    "unit": "%",  # all remaining series are in % or index points
+                    "unit": _FRED_UNITS.get(series_id, "index"),
+                    "source": "FRED",
+                    "fetched_ts": fetched_ts,
                 }
             except Exception:
                 continue
@@ -142,6 +158,7 @@ def fetch_eia_petroleum() -> dict:
 
         latest = entries[0]
         previous = entries[1] if len(entries) > 1 else None
+        fetched_ts = time.time()
 
         result = {
             "crude_inventory": {
@@ -149,6 +166,8 @@ def fetch_eia_petroleum() -> dict:
                 "date": latest.get("period", ""),
                 "unit": "thousand barrels",
                 "previous": float(previous.get("value", 0)) if previous else None,
+                "source": "EIA",
+                "fetched_ts": fetched_ts,
             }
         }
 
@@ -181,6 +200,9 @@ def build_research_context() -> str:
             prev = info.get("previous")
             unit = info.get("unit", "")
             date = info.get("date", "")
+            fetched_ts = float(info.get("fetched_ts", 0) or 0)
+            age_m = int((time.time() - fetched_ts) / 60) if fetched_ts else None
+            freshness = f"{age_m}m old" if age_m is not None else "age unknown"
 
             if prev is not None:
                 delta = val - prev
@@ -190,9 +212,9 @@ def build_research_context() -> str:
                 change = ""
 
             if unit == "%":
-                line = f"  {info['name']}: {val:.2f}%{change} (as of {date})"
+                line = f"  {info['name']}: {val:.2f}%{change} (as of {date}, {freshness})"
             else:
-                line = f"  {info['name']}: {val:,.2f}{change} (as of {date})"
+                line = f"  {info['name']}: {val:,.2f}{change} (as of {date}, {freshness})"
 
             region = _REGION_MAP.get(sid, "Other")
             by_region.setdefault(region, []).append(line)
@@ -210,6 +232,9 @@ def build_research_context() -> str:
         val = inv["value"]
         prev = inv.get("previous")
         date = inv.get("date", "")
+        fetched_ts = float(inv.get("fetched_ts", 0) or 0)
+        age_m = int((time.time() - fetched_ts) / 60) if fetched_ts else None
+        freshness = f", {age_m}m old" if age_m is not None else ""
 
         change = ""
         if prev is not None:
@@ -219,7 +244,7 @@ def build_research_context() -> str:
 
         sections.append(
             f"EIA PETROLEUM DATA:\n"
-            f"  US Crude Oil Inventory: {val:,.0f} thousand barrels{change} (week of {date})"
+            f"  US Crude Oil Inventory: {val:,.0f} thousand barrels{change} (week of {date}{freshness})"
         )
 
     return "\n\n".join(sections) if sections else ""

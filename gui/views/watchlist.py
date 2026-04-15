@@ -34,6 +34,8 @@ class WatchlistView(QWidget):
         self._mw    = main_window
         self._live: dict[str, dict] = {}
         self._alert_panel_visible = False
+        self._refresh_in_progress = False
+        self._refresh_queued = False
         self._setup_ui()
         self._build_rows()
 
@@ -328,7 +330,9 @@ class WatchlistView(QWidget):
 
             atype = entry.get("type", "price")
             dot_color = type_colors.get(atype, TEXT_MUTED)
-            msg_lbl = QLabel(f"\u25cf {entry.get('message', '')}")
+            conf = entry.get("confidence")
+            conf_text = f" (conf {float(conf):.2f})" if conf is not None else ""
+            msg_lbl = QLabel(f"\u25cf {entry.get('message', '')}{conf_text}")
             msg_lbl.setWordWrap(True)
             msg_lbl.setStyleSheet(
                 f"color: {dot_color}; font-size: 11px; background: transparent; border: none;"
@@ -377,6 +381,8 @@ class WatchlistView(QWidget):
         f_rsi_below = _field("RSI Alert Below (optional)",    "rsi_below")
         f_buy_tgt   = _field("Buy Target Price (optional)",   "buy_target")
         f_sell_tgt  = _field("Sell Target Price (optional)",  "sell_target")
+        f_cooldown  = _field("Cooldown Minutes (default 30)", "alert_cooldown_minutes")
+        f_min_conf  = _field("Min Confidence 0-1 (default 0.55)", "min_confidence")
 
         error_lbl = QLabel("")
         error_lbl.setStyleSheet(f"color: {NEGATIVE}; font-size: 12px;")
@@ -408,6 +414,25 @@ class WatchlistView(QWidget):
                     entry[key] = val
                 else:
                     entry.pop(key, None)
+            cooldown_val, cooldown_err = _parse_float("Cooldown Minutes", f_cooldown.text())
+            if cooldown_err:
+                error_lbl.setText(cooldown_err)
+                return
+            min_conf_val, min_conf_err = _parse_float("Min Confidence", f_min_conf.text())
+            if min_conf_err:
+                error_lbl.setText(min_conf_err)
+                return
+            if cooldown_val is not None:
+                entry["alert_cooldown_minutes"] = max(int(cooldown_val), 1)
+            else:
+                entry["alert_cooldown_minutes"] = self._state.default_alert_cooldown_minutes
+            if min_conf_val is not None:
+                if not (0.0 <= min_conf_val <= 1.0):
+                    error_lbl.setText("Min Confidence must be between 0 and 1")
+                    return
+                entry["min_confidence"] = min_conf_val
+            else:
+                entry["min_confidence"] = self._state.default_alert_confidence
             self._state.save_watchlist()
             dlg.close()
             self._build_rows()
@@ -423,7 +448,7 @@ class WatchlistView(QWidget):
         btn_row.addWidget(save_btn)
 
         layout.addWidget(title_lbl)
-        for w in [f_p_above, f_p_below, f_rsi_above, f_rsi_below, f_buy_tgt, f_sell_tgt, error_lbl]:
+        for w in [f_p_above, f_p_below, f_rsi_above, f_rsi_below, f_buy_tgt, f_sell_tgt, f_cooldown, f_min_conf, error_lbl]:
             layout.addWidget(w)
         layout.addLayout(btn_row)
         dlg.show()
@@ -432,47 +457,65 @@ class WatchlistView(QWidget):
 
     async def refresh(self, _e=None) -> None:
         import yfinance as yf
+        if self._refresh_in_progress:
+            self._refresh_queued = True
+            return
+        self._refresh_in_progress = True
         self._refresh_btn.setEnabled(False)
         self._refresh_btn.setText("Refreshing…")
         tickers = [item["ticker"] for item in self._state.watchlist]
+        failures = 0
 
-        for ticker in tickers:
-            try:
-                def _fetch(t: str):
-                    obj  = yf.Ticker(t)
-                    hist = obj.history(period="1mo")
-                    try:
-                        currency = obj.fast_info.currency or "USD"
-                    except Exception:
-                        currency = "USD"
-                    return hist, currency
+        try:
+            for ticker in tickers:
+                try:
+                    def _fetch(t: str):
+                        obj  = yf.Ticker(t)
+                        hist = obj.history(period="1mo")
+                        try:
+                            currency = obj.fast_info.currency or "USD"
+                        except Exception:
+                            currency = "USD"
+                        return hist, currency
 
-                hist, currency = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda t=ticker: _fetch(t)
-                )
-                if hist.empty:
+                    hist, currency = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda t=ticker: _fetch(t)
+                    )
+                    if hist.empty:
+                        failures += 1
+                        self._live[ticker] = {"error": True}
+                        continue
+                    price  = float(hist["Close"].iloc[-1])
+                    delta  = hist["Close"].diff()
+                    gains  = delta.clip(lower=0).rolling(14).mean()
+                    losses = (-delta.clip(upper=0)).rolling(14).mean()
+                    rsi    = float((100 - 100 / (1 + gains / losses)).iloc[-1])
+
+                    # 1-day change %
+                    prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price
+                    change_pct = ((price - prev) / prev * 100) if prev else 0.0
+
+                    self._live[ticker] = {
+                        "price": price, "rsi": rsi, "currency": currency,
+                        "change_pct": change_pct,
+                    }
+                except Exception:
+                    failures += 1
                     self._live[ticker] = {"error": True}
-                    continue
-                price  = float(hist["Close"].iloc[-1])
-                delta  = hist["Close"].diff()
-                gains  = delta.clip(lower=0).rolling(14).mean()
-                losses = (-delta.clip(upper=0)).rolling(14).mean()
-                rsi    = float((100 - 100 / (1 + gains / losses)).iloc[-1])
 
-                # 1-day change %
-                prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price
-                change_pct = ((price - prev) / prev * 100) if prev else 0.0
-
-                self._live[ticker] = {
-                    "price": price, "rsi": rsi, "currency": currency,
-                    "change_pct": change_pct,
-                }
-            except Exception:
-                self._live[ticker] = {"error": True}
-
-        self._build_rows()
-        self._refresh_btn.setEnabled(True)
-        self._refresh_btn.setText("Refresh")
+            self._build_rows()
+            if failures > 0 and tickers:
+                self._mw.show_status(
+                    f"Degraded mode: {failures}/{len(tickers)} watchlist tickers failed. Press Refresh to retry.",
+                    5000,
+                )
+        finally:
+            self._refresh_btn.setEnabled(True)
+            self._refresh_btn.setText("Refresh")
+            self._refresh_in_progress = False
+            if self._refresh_queued:
+                self._refresh_queued = False
+                await self.refresh()
 
     # ── Add dialog ────────────────────────────────────────────────────────
 
@@ -501,6 +544,8 @@ class WatchlistView(QWidget):
         f_p_below   = _field("Price Alert Below (optional)")
         f_rsi_above = _field("RSI Alert Above (optional)")
         f_rsi_below = _field("RSI Alert Below (optional)")
+        f_cooldown  = _field(f"Cooldown Minutes (default {self._state.default_alert_cooldown_minutes})")
+        f_min_conf  = _field(f"Min Confidence 0-1 (default {self._state.default_alert_confidence:.2f})")
 
         error_lbl = QLabel("")
         error_lbl.setStyleSheet(f"color: {NEGATIVE}; font-size: 12px;")
@@ -543,6 +588,27 @@ class WatchlistView(QWidget):
                     return
                 if val is not None:
                     entry[key] = val
+            cooldown_val, cooldown_err = _parse_float("Cooldown Minutes", f_cooldown.text())
+            if cooldown_err:
+                error_lbl.setText(cooldown_err)
+                return
+            min_conf_val, min_conf_err = _parse_float("Min Confidence", f_min_conf.text())
+            if min_conf_err:
+                error_lbl.setText(min_conf_err)
+                return
+            entry["alert_cooldown_minutes"] = (
+                max(int(cooldown_val), 1)
+                if cooldown_val is not None
+                else self._state.default_alert_cooldown_minutes
+            )
+            if min_conf_val is not None and not (0.0 <= min_conf_val <= 1.0):
+                error_lbl.setText("Min Confidence must be between 0 and 1")
+                return
+            entry["min_confidence"] = (
+                min_conf_val
+                if min_conf_val is not None
+                else self._state.default_alert_confidence
+            )
             self._state.watchlist.append(entry)
             self._state.save_watchlist()
             dlg.close()
@@ -554,7 +620,7 @@ class WatchlistView(QWidget):
         btn_row.addWidget(add_btn)
 
         layout.addWidget(title_lbl)
-        for w in [f_ticker, f_p_above, f_p_below, f_rsi_above, f_rsi_below, error_lbl]:
+        for w in [f_ticker, f_p_above, f_p_below, f_rsi_above, f_rsi_below, f_cooldown, f_min_conf, error_lbl]:
             layout.addWidget(w)
         layout.addLayout(btn_row)
 

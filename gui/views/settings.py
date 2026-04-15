@@ -21,6 +21,7 @@ from gui.theme import (
     ACCENT, NEGATIVE, POSITIVE,
     SURFACE_2, SURFACE_3, TEXT_1, TEXT_2, TEXT_MUTED,
 )
+from services.diagnostics import snapshot as diagnostics_snapshot
 
 if TYPE_CHECKING:
     from gui.app import MainWindow
@@ -159,6 +160,38 @@ class SettingsView(QWidget):
         ]))
         body_layout.addSpacing(16)
 
+        # ── Diagnostics card ───────────────────────────────────────────────
+        self._diag_provider_val = QLabel("—")
+        self._diag_fallback_val = QLabel("—")
+        self._diag_tools_val = QLabel("—")
+        self._diag_cache_val = QLabel("—")
+        for lbl in (
+            self._diag_provider_val,
+            self._diag_fallback_val,
+            self._diag_tools_val,
+            self._diag_cache_val,
+        ):
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(f"color: {TEXT_2}; font-size: 12px;")
+
+        self._diag_refresh_btn = QPushButton("Refresh Diagnostics")
+        self._diag_refresh_btn.setFixedHeight(30)
+        self._diag_refresh_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none;"
+            f"border-radius: 8px; padding: 4px 12px; font-size: 12px; }}"
+            f"QPushButton:hover {{ background: {SURFACE_3}; }}"
+        )
+        self._diag_refresh_btn.clicked.connect(self._refresh_diagnostics_panel)
+
+        body_layout.addWidget(self._section_card("Diagnostics", [
+            self._diag_row("Selected LLM", self._diag_provider_val),
+            self._diag_row("Fallback / Mode", self._diag_fallback_val),
+            self._diag_row("Tool Health", self._diag_tools_val),
+            self._diag_row("Cache Hit Rate", self._diag_cache_val),
+            self._diag_refresh_btn,
+        ]))
+        body_layout.addSpacing(16)
+
         # ── Save row ──────────────────────────────────────────────────────
         save_row = QHBoxLayout()
         save_btn = QPushButton("Save Settings")
@@ -190,6 +223,7 @@ class SettingsView(QWidget):
 
         scroll.setWidget(body)
         root.addWidget(scroll, stretch=1)
+        self._refresh_diagnostics_panel()
 
     def _build_header(self) -> QWidget:
         header = QWidget()
@@ -257,6 +291,57 @@ class SettingsView(QWidget):
         h.addStretch()
         return w
 
+    def _diag_row(self, label: str, value_label: QLabel) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+        key = QLabel(label)
+        key.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; min-width: 110px;")
+        h.addWidget(key)
+        h.addWidget(value_label, stretch=1)
+        return w
+
+    def _refresh_diagnostics_panel(self) -> None:
+        data = diagnostics_snapshot()
+        llm = data.get("llm", {})
+        derived = data.get("derived", {})
+        selected = llm.get("selected_provider") or self._state.detect_provider()
+        degraded = "degraded" if llm.get("degraded_mode") else "normal"
+        fallback = int(llm.get("fallback_count", 0))
+        last_error = llm.get("last_error") or "none"
+        total_alerts = 0
+        total_hits = 0
+        for row in self._state.alert_precision_stats.values():
+            total_alerts += int(row.get("total", 0))
+            total_hits += int(row.get("hits", 0))
+        alert_precision = (total_hits / total_alerts * 100.0) if total_alerts else 0.0
+
+        tool_lat = derived.get("tool_avg_latency_ms", {})
+        tool_err = derived.get("tool_error_rate_pct", {})
+        cache_hit = derived.get("cache_hit_rate_pct", {})
+
+        tool_bits = []
+        for tool in sorted(tool_lat):
+            tool_bits.append(f"{tool}: {tool_lat[tool]:.0f}ms avg, {tool_err.get(tool, 0.0):.1f}% err")
+        if not tool_bits:
+            tool_bits = ["No tool telemetry yet"]
+
+        cache_bits = []
+        for name in sorted(cache_hit):
+            cache_bits.append(f"{name}: {cache_hit[name]:.1f}%")
+        if not cache_bits:
+            cache_bits = ["No cache telemetry yet"]
+
+        self._diag_provider_val.setText(str(selected))
+        self._diag_fallback_val.setText(
+            f"fallbacks: {fallback}  |  mode: {degraded}  |  alert precision: {alert_precision:.1f}%"
+            f"  |  last error: {last_error}"
+        )
+        self._diag_tools_val.setText("  |  ".join(tool_bits))
+        self._diag_cache_val.setText("  |  ".join(cache_bits))
+
     def _interval_combo(self, current_val: str, options: list[tuple[str, str]]) -> QComboBox:
         dd = QComboBox()
         for key, text in options:
@@ -297,23 +382,25 @@ class SettingsView(QWidget):
         self._steps_lbl.setText(f"Max Steps: {value}")
 
     async def _test_connection(self) -> None:
-        """Ping the active provider with a minimal 1-token request."""
+        """Ping configured providers with minimal requests."""
         import httpx
 
         self._test_btn.setEnabled(False)
         self._test_btn.setText("Testing…")
         self._save_status.setText("")
 
-        provider = self._state.detect_provider()
         nvidia_key     = self._nvidia_f.text().strip()
         anthropic_key  = self._anthropic_f.text().strip()
         openai_key     = self._openai_f.text().strip()
+        search_key     = self._search_f.text().strip()
+        search_provider = str(self._provider_dd.currentData() or "brave")
 
-        ok = False
-        detail = ""
+        checks: list[str] = []
+        has_success = False
         try:
             loop = asyncio.get_running_loop()
-            if "NVIDIA" in provider and nvidia_key:
+
+            if nvidia_key:
                 def _ping_nvidia():
                     r = httpx.post(
                         "https://integrate.api.nvidia.com/v1/chat/completions",
@@ -325,9 +412,10 @@ class SettingsView(QWidget):
                     return r.status_code
                 status = await loop.run_in_executor(None, _ping_nvidia)
                 ok = status == 200
-                detail = f"NVIDIA ({status})"
+                has_success = has_success or ok
+                checks.append(f"NVIDIA:{status}")
 
-            elif "Anthropic" in provider and anthropic_key:
+            if anthropic_key:
                 def _ping_anthropic():
                     r = httpx.post(
                         "https://api.anthropic.com/v1/messages",
@@ -340,9 +428,10 @@ class SettingsView(QWidget):
                     return r.status_code
                 status = await loop.run_in_executor(None, _ping_anthropic)
                 ok = status == 200
-                detail = f"Anthropic ({status})"
+                has_success = has_success or ok
+                checks.append(f"Anthropic:{status}")
 
-            elif "OpenAI" in provider and openai_key:
+            if openai_key:
                 def _ping_openai():
                     r = httpx.post(
                         "https://api.openai.com/v1/chat/completions",
@@ -354,13 +443,38 @@ class SettingsView(QWidget):
                     return r.status_code
                 status = await loop.run_in_executor(None, _ping_openai)
                 ok = status == 200
-                detail = f"OpenAI ({status})"
-            else:
-                detail = "No provider configured — save API keys first"
-        except Exception as exc:
-            detail = str(exc)[:60]
+                has_success = has_success or ok
+                checks.append(f"OpenAI:{status}")
 
-        if ok:
+            if search_key and search_provider == "brave":
+                def _ping_brave():
+                    r = httpx.get(
+                        "https://api.search.brave.com/res/v1/web/search",
+                        params={"q": "market", "count": 1},
+                        headers={"Accept": "application/json", "X-Subscription-Token": search_key},
+                        timeout=10,
+                    )
+                    return r.status_code
+                status = await loop.run_in_executor(None, _ping_brave)
+                checks.append(f"Brave:{status}")
+            elif search_key and search_provider == "tavily":
+                def _ping_tavily():
+                    r = httpx.post(
+                        "https://api.tavily.com/search",
+                        json={"api_key": search_key, "query": "market", "max_results": 1, "search_depth": "basic"},
+                        timeout=10,
+                    )
+                    return r.status_code
+                status = await loop.run_in_executor(None, _ping_tavily)
+                checks.append(f"Tavily:{status}")
+
+            if not checks:
+                checks.append("No keys configured")
+        except Exception as exc:
+            checks.append(str(exc)[:60])
+
+        detail = "  |  ".join(checks)
+        if has_success:
             self._save_status.setText(f"Connected — {detail}")
             self._save_status.setStyleSheet(f"color: {POSITIVE}; font-size: 12px;")
         else:
@@ -369,6 +483,7 @@ class SettingsView(QWidget):
 
         self._test_btn.setEnabled(True)
         self._test_btn.setText("Test Connection")
+        self._refresh_diagnostics_panel()
 
     async def _save(self) -> None:
         from dotenv import set_key
@@ -427,6 +542,7 @@ class SettingsView(QWidget):
             # Update provider label in analysis view
             self._mw._analysis_view.update_provider_label(provider)
             self._mw.show_status(f"Settings saved — {provider}", 4000)
+            self._refresh_diagnostics_panel()
 
         except Exception as exc:
             self._save_status.setText(f"Error: {exc}")

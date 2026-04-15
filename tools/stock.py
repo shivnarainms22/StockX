@@ -16,6 +16,8 @@ from typing import Any
 
 import httpx
 
+from services.diagnostics import record_cache
+
 # ── Company name → ticker symbol lookup ──────────────────────────────────────
 _NAME_TO_TICKER: dict[str, str] = {
     # Tech
@@ -185,6 +187,19 @@ _ETF_TICKERS: set[str] = {
 # ── Ticker result cache (item 2) ─────────────────────────────────────────────
 _ticker_cache: dict[str, tuple[float, str]] = {}  # {ticker: (timestamp, result)}
 _TICKER_TTL = 300  # 5 minutes
+
+
+def _rating_for_total_score(total_score: float) -> str:
+    """Map composite score to recommendation tier."""
+    if total_score >= 30:
+        return "STRONG BUY"
+    if total_score >= 22:
+        return "BUY"
+    if total_score >= 14:
+        return "WATCH / HOLD"
+    if total_score >= 7:
+        return "CAUTION"
+    return "AVOID"
 
 
 def clear_ticker_cache(ticker: str | None = None) -> None:
@@ -752,7 +767,9 @@ class StockTool(BaseTool):
         if ticker in _ticker_cache:
             cache_ts, cached_result = _ticker_cache[ticker]
             if now - cache_ts < _TICKER_TTL:
+                record_cache("stock", hit=True)
                 return cached_result
+        record_cache("stock", hit=False)
 
         try:
             stock, hist, info = _ticker_with_retry(ticker)
@@ -1008,11 +1025,7 @@ class StockTool(BaseTool):
 
             total_score = tech_score + fund_score + risk_score
 
-            if total_score >= 30:   rating = "STRONG BUY"
-            elif total_score >= 22: rating = "BUY"
-            elif total_score >= 14: rating = "WATCH / HOLD"
-            elif total_score >= 7:  rating = "CAUTION"
-            else:                   rating = "AVOID"
+            rating = _rating_for_total_score(total_score)
 
             # ── Trading setup ─────────────────────────────────────────────
             stop_loss      = max(support, price - 2 * atr)
@@ -1156,9 +1169,34 @@ class StockTool(BaseTool):
 
             # Score card sentinel for GUI rendering (item 3)
             import json as _json
+            from datetime import datetime as _dt
+            quality_fields = {
+                "price": price,
+                "market_cap": mktcap,
+                "pe_trailing": pe_trail,
+                "pe_forward": pe_fwd,
+                "revenue_growth": rev_growth,
+                "earnings_growth": earn_growth,
+                "profit_margin": profit_mg,
+                "roe": roe,
+                "analyst_target": tgt_price,
+                "analyst_mean": rec_mean,
+                "volatility": ann_vol,
+            }
+            missing_fields = [
+                key for key, val in quality_fields.items()
+                if val is None or val == "" or val == "N/A"
+            ]
+            completeness = 1.0 - (len(missing_fields) / max(len(quality_fields), 1))
+            score_confidence = max(0.35, min(0.95, 0.45 + completeness * 0.5))
             score_card_json = _json.dumps({
+                "schema_version": 2,
                 "tech": tech_score, "fund": fund_score, "risk": risk_score,
                 "total": total_score, "rating": rating,
+                "confidence": round(score_confidence, 2),
+                "missing_fields": missing_fields[:8],
+                "generated_at": _dt.now().isoformat(timespec="seconds"),
+                "freshness_note": "Market quotes may be delayed by up to 15 minutes",
             })
             report.append(f"SCORE_CARD:{score_card_json}")
 

@@ -20,8 +20,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 
 from gui.state import AppState, Message
+from services.diagnostics import snapshot as diagnostics_snapshot
 from gui.theme import (
-    ACCENT, ACCENT_CYAN, ACCENT_GLOW, APP_BG, BORDER_CARD, BORDER_INPUT,
+    ACCENT, ACCENT_CYAN, ACCENT_GLOW, APP_BG, BORDER_CARD, BORDER_INPUT, CAUTION,
     BORDER_SUBTLE, NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, TEXT_1, TEXT_MUTED, TEXT_2,
 )
 
@@ -119,6 +120,41 @@ def _chip_btn(label: str) -> QPushButton:
     btn = QPushButton(label)
     btn.setObjectName("Chip")
     return btn
+
+
+def _extract_score_card_payload(final_text: str) -> tuple[str, dict | None]:
+    score_data: dict | None = None
+    clean_lines: list[str] = []
+    for line in final_text.splitlines():
+        if not line.startswith("SCORE_CARD:"):
+            clean_lines.append(line)
+            continue
+        try:
+            parsed = json.loads(line[len("SCORE_CARD:"):])
+            if isinstance(parsed, dict):
+                score_data = {
+                    "schema_version": int(parsed.get("schema_version", 1)),
+                    "tech": int(parsed.get("tech", 0)),
+                    "fund": int(parsed.get("fund", 0)),
+                    "risk": int(parsed.get("risk", 0)),
+                    "total": int(parsed.get("total", 0)),
+                    "rating": str(parsed.get("rating", "")),
+                    "confidence": (
+                        float(parsed.get("confidence"))
+                        if parsed.get("confidence") is not None
+                        else None
+                    ),
+                    "missing_fields": (
+                        [str(x) for x in parsed.get("missing_fields", [])]
+                        if isinstance(parsed.get("missing_fields"), list)
+                        else []
+                    ),
+                    "generated_at": str(parsed.get("generated_at", "")),
+                    "freshness_note": str(parsed.get("freshness_note", "")),
+                }
+        except Exception:
+            pass
+    return "\n".join(clean_lines), score_data
 
 
 # ── AnalysisView ──────────────────────────────────────────────────────────────
@@ -648,6 +684,10 @@ class AnalysisView(QWidget):
         risk  = data.get("risk", 0)
         total = data.get("total", 0)
         rating = data.get("rating", "")
+        confidence = data.get("confidence")
+        missing_fields = data.get("missing_fields") or []
+        generated_at = data.get("generated_at") or ""
+        freshness_note = data.get("freshness_note") or ""
 
         card = QFrame()
         card.setStyleSheet(
@@ -699,6 +739,26 @@ class AnalysisView(QWidget):
         layout.addWidget(_score_row("Fundamental", fund, 25, ACCENT))
         layout.addWidget(_score_row("Risk", risk + 5, 10, POSITIVE if risk >= 0 else NEGATIVE))
         layout.addWidget(_score_row("Total", total, 45, rating_color))
+
+        if confidence is not None:
+            conf_color = POSITIVE if confidence >= 0.7 else (CAUTION if confidence >= 0.55 else NEGATIVE)
+            conf_lbl = QLabel(f"Confidence: {confidence * 100:.0f}%")
+            conf_lbl.setStyleSheet(f"color: {conf_color}; font-size: 11px; background: transparent;")
+            layout.addWidget(conf_lbl)
+        if missing_fields:
+            miss_lbl = QLabel("Missing data: " + ", ".join(missing_fields[:4]))
+            miss_lbl.setWordWrap(True)
+            miss_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent;")
+            layout.addWidget(miss_lbl)
+        if freshness_note:
+            fresh_lbl = QLabel(freshness_note)
+            fresh_lbl.setWordWrap(True)
+            fresh_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent;")
+            layout.addWidget(fresh_lbl)
+        if generated_at:
+            ts_lbl = QLabel(f"Generated: {generated_at.replace('T', ' ')}")
+            ts_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px; background: transparent;")
+            layout.addWidget(ts_lbl)
 
         # Wrap in same left-aligned row as agent bubbles
         row_w = QWidget()
@@ -759,7 +819,24 @@ class AnalysisView(QWidget):
 
         # Guard: agent still initializing
         if self._state.agent is None:
-            self._add_bubble("Agent is still initializing — please wait a moment.", is_user=False)
+            try:
+                self._mw.retry_agent_init()
+            except Exception:
+                pass
+            if self._state.agent_init_in_progress:
+                msg = (
+                    "Agent is still initializing. "
+                    f"(attempt {max(self._state.agent_init_attempts, 1)}/3)"
+                )
+            elif self._state.agent_init_error:
+                msg = (
+                    "Agent failed to initialize.\n"
+                    f"Reason: {self._state.agent_init_error}\n"
+                    "Retrying in background. You can also open Settings and Test Connection."
+                )
+            else:
+                msg = "Agent is still initializing — please wait a moment."
+            self._add_bubble(msg, is_user=False)
             return
 
         self._state.is_busy = True
@@ -790,18 +867,7 @@ class AnalysisView(QWidget):
                 self._scroll_to_bottom()
 
         def _on_done(final_text: str) -> None:
-            # Extract and strip SCORE_CARD sentinel (item 3)
-            score_data: dict | None = None
-            clean_lines = []
-            for line in final_text.splitlines():
-                if line.startswith("SCORE_CARD:"):
-                    try:
-                        score_data = json.loads(line[len("SCORE_CARD:"):])
-                    except Exception:
-                        pass
-                else:
-                    clean_lines.append(line)
-            display_text = "\n".join(clean_lines)
+            display_text, score_data = _extract_score_card_payload(final_text)
 
             agent_msg.content      = display_text
             agent_msg.is_streaming = False
@@ -814,10 +880,20 @@ class AnalysisView(QWidget):
                 self._insert_score_card(score_data)
             self._state.commit_to_history(text, display_text)
             self._state.save_history_entry(text, display_text)
+            try:
+                llm_diag = diagnostics_snapshot().get("llm", {})
+                if llm_diag.get("degraded_mode"):
+                    selected = llm_diag.get("selected_provider") or "fallback provider"
+                    self._mw.show_status(
+                        f"Degraded mode: primary LLM unavailable, using {selected}",
+                        5000,
+                    )
+            except Exception:
+                pass
             _cleanup()
 
         def _on_error(err: str) -> None:
-            msg = f"Error: {err}"
+            msg = f"Error: {err}\n\nTip: press Send again to retry."
             agent_msg.content = msg
             try:
                 if self._streaming_label is not None:

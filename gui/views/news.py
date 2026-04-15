@@ -202,6 +202,7 @@ class NewsView(QWidget):
             from datetime import datetime, timezone
             seen: set[str] = set()
             items: list[dict] = []
+            failures = 0
             for t in tickers:
                 try:
                     raw = yf.Ticker(t).news or []
@@ -238,11 +239,11 @@ class NewsView(QWidget):
                             "url":       url,
                         })
                 except Exception:
-                    pass
+                    failures += 1
             items.sort(key=lambda x: x["ts"], reverse=True)
-            return items
+            return items, failures
 
-        articles = await asyncio.get_event_loop().run_in_executor(None, _fetch_news)
+        articles, failures = await asyncio.get_event_loop().run_in_executor(None, _fetch_news)
 
         # Score sentiment for each headline (item 17)
         try:
@@ -260,9 +261,19 @@ class NewsView(QWidget):
             no_news.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 14px; font-style: italic; padding: 32px;")
             self._body_layout.addWidget(no_news)
         else:
+            if failures > 0:
+                warn = QLabel(
+                    f"Degraded mode: failed to load news for {failures} ticker(s). "
+                    f"Press Refresh to retry."
+                )
+                warn.setStyleSheet(
+                    f"color: {ACCENT_CYAN}; font-size: 12px; padding: 6px 2px; background: transparent;"
+                )
+                self._body_layout.addWidget(warn, 0, 0, 1, 2)
             for i, art in enumerate(articles):
                 card = _NewsCard(art)
-                self._body_layout.addWidget(card, i // 2, i % 2)
+                row_offset = 1 if failures > 0 else 0
+                self._body_layout.addWidget(card, (i // 2) + row_offset, i % 2)
 
         self._refresh_btn.setEnabled(True)
         self._refresh_btn.setText("Refresh")

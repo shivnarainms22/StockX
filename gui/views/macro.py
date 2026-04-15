@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -218,23 +219,66 @@ def _fetch_commodities() -> dict[str, dict]:
 
     def _fetch_one(cat: str, name: str, sym: str) -> None:
         try:
-            hist = yf.Ticker(sym).history(period="7d")
+            hist = yf.Ticker(sym).history(period="7mo")
+            fetched_ts = time.time()
             if hist.empty or len(hist) < 1:
                 results[sym] = {"name": name, "category": cat, "price": None,
-                                "pct_1d": None, "pct_1w": None, "prices_5d": []}
+                                "pct_1d": None, "pct_1w": None, "pct_1m": None,
+                                "pct_3m": None, "pct_6m": None,
+                                "delta_1m": None, "vol_1m": None, "prices_5d": [],
+                                "fetched_ts": fetched_ts}
                 return
             closes = [float(c) for c in hist["Close"].tolist()]
             price = closes[-1]
             pct_1d = ((closes[-1] - closes[-2]) / closes[-2] * 100) if len(closes) >= 2 else None
             pct_1w = ((closes[-1] - closes[0]) / closes[0] * 100) if len(closes) >= 2 else None
+            month_anchor = -22 if len(closes) >= 22 else (0 if len(closes) > 1 else None)
+            pct_1m = None
+            delta_1m = None
+            if month_anchor is not None:
+                base = closes[month_anchor]
+                if base != 0:
+                    pct_1m = (closes[-1] - base) / base * 100
+                delta_1m = closes[-1] - base
+            q_anchor = -63 if len(closes) >= 63 else (0 if len(closes) > 1 else None)
+            h_anchor = -126 if len(closes) >= 126 else (0 if len(closes) > 1 else None)
+            pct_3m = None
+            pct_6m = None
+            if q_anchor is not None:
+                q_base = closes[q_anchor]
+                if q_base != 0:
+                    pct_3m = (closes[-1] - q_base) / q_base * 100
+            if h_anchor is not None:
+                h_base = closes[h_anchor]
+                if h_base != 0:
+                    pct_6m = (closes[-1] - h_base) / h_base * 100
+            vol_1m = None
+            if len(closes) >= 8:
+                recent = closes[-22:] if len(closes) >= 22 else closes
+                rets = []
+                for i in range(1, len(recent)):
+                    prev = recent[i - 1]
+                    curr = recent[i]
+                    if prev != 0:
+                        rets.append((curr / prev - 1.0) * 100.0)
+                if len(rets) >= 5:
+                    import statistics as _stats
+                    vol_1m = _stats.pstdev(rets)
             results[sym] = {
                 "name": name, "category": cat, "price": price,
                 "pct_1d": pct_1d, "pct_1w": pct_1w,
+                "pct_1m": pct_1m, "pct_3m": pct_3m, "pct_6m": pct_6m,
+                "delta_1m": delta_1m, "vol_1m": vol_1m,
                 "prices_5d": closes[-5:] if len(closes) >= 5 else closes,
+                "fetched_ts": fetched_ts,
             }
         except Exception:
+            fetched_ts = time.time()
             results[sym] = {"name": name, "category": cat, "price": None,
-                            "pct_1d": None, "pct_1w": None, "prices_5d": []}
+                            "pct_1d": None, "pct_1w": None, "pct_1m": None,
+                            "pct_3m": None, "pct_6m": None,
+                            "delta_1m": None, "vol_1m": None, "prices_5d": [],
+                            "fetched_ts": fetched_ts}
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = [pool.submit(_fetch_one, cat, name, sym) for cat, name, sym in all_symbols]
@@ -440,6 +484,10 @@ class _ScenarioResultPanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
 
+        probs = self._extract_probabilities(text)
+        if probs:
+            self._add_probability_layer(probs)
+
         # Split response into tier sections
         sections = self._split_tiers(text)
         if not sections:
@@ -450,6 +498,73 @@ class _ScenarioResultPanel(QWidget):
         for tier_key, content in sections:
             cfg = self._TIER_CONFIG.get(tier_key, {"color": TEXT_2, "label": tier_key})
             self._add_tier_frame(cfg["label"], cfg["color"], content, portfolio_tickers)
+
+    def _extract_probabilities(self, text: str) -> dict[str, int]:
+        patterns = {
+            "Base": r"Base(?:\s+case)?\s*\(?\s*(\d{1,3})\s*%\)?",
+            "Bull": r"Bull(?:\s+case)?\s*\(?\s*(\d{1,3})\s*%\)?",
+            "Bear": r"Bear(?:\s+case)?\s*\(?\s*(\d{1,3})\s*%\)?",
+        }
+        out: dict[str, int] = {}
+        for k, p in patterns.items():
+            m = re.search(p, text, flags=re.IGNORECASE)
+            if m:
+                out[k] = max(0, min(100, int(m.group(1))))
+        if len(out) < 2:
+            return {}
+        total = sum(out.values())
+        if total <= 0:
+            return {}
+        # Normalize so bars add to 100.
+        for k in list(out.keys()):
+            out[k] = int(round(out[k] * 100 / total))
+        # Fix rounding drift to exactly 100.
+        drift = 100 - sum(out.values())
+        if drift != 0:
+            key = max(out.keys(), key=lambda kk: out[kk])
+            out[key] += drift
+        return out
+
+    def _add_probability_layer(self, probs: dict[str, int]) -> None:
+        frame = QFrame()
+        frame.setStyleSheet(
+            f"QFrame {{ background-color: {SURFACE_2}; border: none; border-radius: 12px; }}"
+        )
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(6)
+
+        hdr = QLabel("SCENARIO PROBABILITY LAYER")
+        hdr.setStyleSheet(
+            f"color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 1px;"
+            f"background: transparent;"
+        )
+        layout.addWidget(hdr)
+
+        color_map = {"Base": ACCENT_CYAN, "Bull": POSITIVE, "Bear": NEGATIVE}
+        for key in ("Base", "Bull", "Bear"):
+            if key not in probs:
+                continue
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            lbl = QLabel(f"{key}: {probs[key]}%")
+            lbl.setFixedWidth(88)
+            lbl.setStyleSheet(f"color: {TEXT_2}; font-size: 11px; background: transparent;")
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(probs[key])
+            bar.setFixedHeight(12)
+            bar.setTextVisible(False)
+            chunk = color_map.get(key, ACCENT)
+            bar.setStyleSheet(
+                f"QProgressBar {{ border: none; background: {SURFACE_3}; border-radius: 6px; }}"
+                f"QProgressBar::chunk {{ background: {chunk}; border-radius: 6px; }}"
+            )
+            row.addWidget(lbl)
+            row.addWidget(bar, stretch=1)
+            layout.addLayout(row)
+
+        self._layout.addWidget(frame)
 
     def _split_tiers(self, text: str) -> list[tuple[str, str]]:
         """Split text into (tier_key, content) pairs based on headers."""
@@ -944,7 +1059,7 @@ class MacroView(QWidget):
 
         # Consumer ticker
         self._body_layout.addSpacing(8)
-        consumer_lbl = QLabel("CONSUMER IMPACT")
+        consumer_lbl = QLabel("CONSUMER INFLATION NOWCAST")
         consumer_lbl.setStyleSheet(
             f"color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px;"
         )
@@ -1066,7 +1181,7 @@ class MacroView(QWidget):
         # Update radar
         self._update_radar(data)
         # Update consumer ticker
-        self._update_consumer_ticker(data)
+        await self._update_consumer_ticker(data)
         # Update FRED macro indicators
         asyncio.ensure_future(self._update_indicators_panel())
 
@@ -1221,13 +1336,251 @@ class MacroView(QWidget):
             no_data.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
             self._radar_container.addWidget(no_data)
 
-    def _update_consumer_ticker(self, data: dict[str, dict]) -> None:
-        """Update consumer impact ticker strip."""
+    async def _update_consumer_ticker(self, data: dict[str, dict]) -> None:
+        """Render both CPI nowcast cards and legacy consumer cost chips."""
         while self._consumer_grid.count():
             item = self._consumer_grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         self._consumer_chip_count = 0
+
+        intro = QLabel(
+            "Model uses 1-month commodity dollar changes + lagged pass-through coefficients. "
+            "Values are estimated CPI contribution (percentage points) with calibration, "
+            "event-aware sensitivity, and data-quality badges."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px;")
+        self._consumer_grid.addWidget(intro, 0, 0, 1, _COLS)
+
+        model: dict = {}
+        try:
+            from services.consumer_inflation import estimate_consumer_inflation_nowcast
+            loop = asyncio.get_event_loop()
+            model = await loop.run_in_executor(
+                None,
+                lambda: estimate_consumer_inflation_nowcast(data, self._state.portfolio),
+            )
+        except Exception as exc:
+            err = QLabel(f"Consumer inflation model unavailable: {exc}")
+            err.setStyleSheet(f"color: {NEGATIVE}; font-size: 11px;")
+            self._consumer_grid.addWidget(err, 1, 0, 1, _COLS)
+
+        def _badge_color(badge: str) -> str:
+            return {"good": POSITIVE, "caution": CAUTION, "poor": NEGATIVE}.get(badge, TEXT_MUTED)
+
+        cursor_row = 1
+        regions_model = {}
+        if model:
+            regions_model = model.get("regions") or {
+                "US": model.get("US", {}),
+                "EU": model.get("EU", {}),
+                "India": model.get("India", {}),
+                "China": model.get("China", {}),
+            }
+
+            # Aggregate Consumer Pressure Index (feature #1).
+            agg = model.get("aggregate") or {}
+            dq_global = model.get("data_quality") or {}
+            events = (model.get("event_context") or {}).get("active", [])
+
+            agg_card = QFrame()
+            agg_card.setStyleSheet(
+                f"QFrame {{ background-color: {SURFACE_2}; border: none; border-radius: 10px; }}"
+            )
+            al = QVBoxLayout(agg_card)
+            al.setContentsMargins(12, 10, 12, 10)
+            al.setSpacing(3)
+
+            agg_idx = int(agg.get("consumer_pressure_index", 50) or 50)
+            agg_regime = str(agg.get("pressure_regime", "balanced"))
+            agg_conf = float(agg.get("confidence", 0.0) or 0.0)
+            agg_h1 = float(agg.get("h1_pp", 0.0) or 0.0)
+            agg_h3 = float(agg.get("h3_pp", 0.0) or 0.0)
+            agg_h6 = float(agg.get("h6_pp", 0.0) or 0.0)
+            idx_color = NEGATIVE if agg_idx >= 62 else (POSITIVE if agg_idx <= 42 else ACCENT_CYAN)
+            badge = str(dq_global.get("badge", "caution"))
+            badge_col = _badge_color(badge)
+
+            t1 = QLabel("CONSUMER PRESSURE INDEX (AGGREGATE)")
+            t1.setStyleSheet(f"color: {TEXT_2}; font-size: 10px; background: transparent;")
+            t2 = QLabel(f"Index {agg_idx}/100  |  {agg_regime}")
+            t2.setStyleSheet(f"color: {idx_color}; font-size: 13px; font-weight: 700; background: transparent;")
+            t3 = QLabel(
+                f"1 Month: {agg_h1:+.2f}pp    3 Month: {agg_h3:+.2f}pp    6 Month: {agg_h6:+.2f}pp"
+            )
+            t3.setStyleSheet(f"color: {TEXT_1}; font-size: 10px; background: transparent;")
+            t4 = QLabel(
+                f"confidence {agg_conf:.2f}  |  quality {badge}"
+                f" (coverage {float(dq_global.get('coverage', 0.0) or 0.0):.2f})"
+            )
+            t4.setStyleSheet(f"color: {badge_col}; font-size: 9px; background: transparent;")
+            al.addWidget(t1)
+            al.addWidget(t2)
+            al.addWidget(t3)
+            al.addWidget(t4)
+            if events:
+                evt = QLabel("Event-aware sensitivity: " + " | ".join(events[:2]))
+                evt.setWordWrap(True)
+                evt.setStyleSheet(f"color: {CAUTION}; font-size: 9px; background: transparent;")
+                al.addWidget(evt)
+            self._consumer_grid.addWidget(agg_card, cursor_row, 0, 1, _COLS)
+            cursor_row += 1
+
+            # Region cards with forecast-vs-actual tracker and data quality badges (#3, #9).
+            regions = ["US", "EU", "India", "China"]
+            for idx, region in enumerate(regions):
+                r = regions_model.get(region) or {}
+                h1 = float(r.get("h1_pp", 0.0) or 0.0)
+                h3 = float(r.get("h3_pp", 0.0) or 0.0)
+                h6 = float(r.get("h6_pp", 0.0) or 0.0)
+                conf = float(r.get("confidence", 0.0) or 0.0)
+                quality = str(r.get("model_quality", "coefficient-only"))
+                r2 = r.get("r2")
+                drivers = r.get("top_drivers", [])
+                idx_score = int(r.get("consumer_pressure_index", 50) or 50)
+                idx_regime = str(r.get("pressure_regime", "balanced"))
+                q = r.get("data_quality") or {}
+                q_badge = str(q.get("badge", "caution"))
+                q_col = _badge_color(q_badge)
+                tracker = r.get("forecast_tracker") or {}
+
+                if abs(h3) < 0.03:
+                    color = TEXT_MUTED
+                    trend = "stable"
+                elif h3 > 0:
+                    color = NEGATIVE
+                    trend = "inflationary pressure"
+                else:
+                    color = POSITIVE
+                    trend = "disinflationary pressure"
+
+                card = QFrame()
+                card.setStyleSheet(
+                    f"QFrame {{ background-color: {SURFACE_2}; border: none; border-radius: 10px; }}"
+                )
+                cl = QVBoxLayout(card)
+                cl.setContentsMargins(12, 10, 12, 10)
+                cl.setSpacing(3)
+
+                title = QLabel(f"{region} CPI Pressure")
+                title.setStyleSheet(f"color: {TEXT_2}; font-size: 10px; background: transparent;")
+                status = QLabel(f"{trend} | index {idx_score} ({idx_regime})")
+                status.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 600; background: transparent;")
+                horizon = QLabel(
+                    f"1 Month: {h1:+.2f}pp    3 Month: {h3:+.2f}pp    6 Month: {h6:+.2f}pp"
+                )
+                horizon.setStyleSheet(f"color: {TEXT_1}; font-size: 10px; background: transparent;")
+                meta = f"confidence {conf:.2f} | {quality} | data {q_badge}"
+                if r2 is not None:
+                    meta += f" | R2 {float(r2):.2f}"
+                meta_lbl = QLabel(meta)
+                meta_lbl.setStyleSheet(f"color: {q_col}; font-size: 9px; background: transparent;")
+
+                samples = int(tracker.get("samples", 0) or 0)
+                mae = tracker.get("mae_pp")
+                hit = tracker.get("hit_rate")
+                lm = tracker.get("latest_month")
+                lf = tracker.get("latest_forecast_mm")
+                la = tracker.get("latest_actual_mm")
+                if samples >= 6 and mae is not None and hit is not None:
+                    tr = (
+                        f"Forecast vs actual ({samples}m): MAE {float(mae):.2f}pp, "
+                        f"hit {float(hit) * 100:.0f}%"
+                    )
+                    if lm and lf is not None and la is not None:
+                        tr += f" | latest {lm}: fcst {float(lf):+.2f} vs actual {float(la):+.2f}"
+                else:
+                    tr = "Forecast vs actual: insufficient history"
+                tr_lbl = QLabel(tr)
+                tr_lbl.setWordWrap(True)
+                tr_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; background: transparent;")
+
+                if drivers:
+                    drv_lbl = QLabel("Drivers: " + "; ".join(drivers[:2]))
+                    drv_lbl.setWordWrap(True)
+                    drv_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; background: transparent;")
+                else:
+                    drv_lbl = QLabel("Drivers: insufficient data")
+                    drv_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; background: transparent;")
+
+                cl.addWidget(title)
+                cl.addWidget(status)
+                cl.addWidget(horizon)
+                cl.addWidget(meta_lbl)
+                cl.addWidget(tr_lbl)
+                cl.addWidget(drv_lbl)
+
+                row, col = divmod(idx, 2)
+                self._consumer_grid.addWidget(card, cursor_row + row, col * 2, 1, 2)
+            cursor_row += 2
+
+            # Portfolio inflation exposure score + decomposition (#5).
+            pexp = model.get("portfolio_exposure") or {}
+            if pexp:
+                exp_card = QFrame()
+                exp_card.setStyleSheet(
+                    f"QFrame {{ background-color: {SURFACE_2}; border: none; border-radius: 10px; }}"
+                )
+                ex = QVBoxLayout(exp_card)
+                ex.setContentsMargins(12, 10, 12, 10)
+                ex.setSpacing(3)
+                score = int(pexp.get("score", 50) or 50)
+                regime = str(pexp.get("regime", "balanced"))
+                beta = float(pexp.get("beta", 0.0) or 0.0)
+                exp_color = NEGATIVE if score >= 65 else (POSITIVE if score <= 40 else ACCENT_CYAN)
+                h = QLabel("PORTFOLIO INFLATION EXPOSURE")
+                h.setStyleSheet(f"color: {TEXT_2}; font-size: 10px; background: transparent;")
+                v = QLabel(f"Score {score}/100  |  beta {beta:+.3f}  |  {regime}")
+                v.setStyleSheet(f"color: {exp_color}; font-size: 12px; font-weight: 700; background: transparent;")
+                ex.addWidget(h)
+                ex.addWidget(v)
+                for line in (pexp.get("top_contributors") or [])[:3]:
+                    l = QLabel(line)
+                    l.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; background: transparent;")
+                    ex.addWidget(l)
+                self._consumer_grid.addWidget(exp_card, cursor_row, 0, 1, _COLS)
+                cursor_row += 1
+
+            # Hedge assistant (#6).
+            hedge = model.get("hedge_assistant") or {}
+            cand = hedge.get("candidates") or []
+            if cand:
+                h_card = QFrame()
+                h_card.setStyleSheet(
+                    f"QFrame {{ background-color: {SURFACE_2}; border: none; border-radius: 10px; }}"
+                )
+                hl = QVBoxLayout(h_card)
+                hl.setContentsMargins(12, 10, 12, 10)
+                hl.setSpacing(2)
+                hh = QLabel("HEDGE ASSISTANT (ESTIMATED RISK REDUCTION)")
+                hh.setStyleSheet(f"color: {TEXT_2}; font-size: 10px; background: transparent;")
+                hs = QLabel(str(hedge.get("summary", "")))
+                hs.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; background: transparent;")
+                hl.addWidget(hh)
+                hl.addWidget(hs)
+                for c in cand[:3]:
+                    row_txt = (
+                        f"{c.get('symbol')} ({c.get('name')}): {c.get('direction')}, "
+                        f"ratio {float(c.get('hedge_ratio', 0.0)):.2f}, "
+                        f"risk reduction ~{float(c.get('estimated_risk_reduction_pct', 0.0)):.1f}%"
+                    )
+                    l = QLabel(row_txt)
+                    l.setStyleSheet(f"color: {ACCENT_CYAN}; font-size: 9px; background: transparent;")
+                    hl.addWidget(l)
+                self._consumer_grid.addWidget(h_card, cursor_row, 0, 1, _COLS)
+                cursor_row += 1
+
+        else:
+            no_data = QLabel("Insufficient commodity data for inflation nowcast.")
+            no_data.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
+            self._consumer_grid.addWidget(no_data, cursor_row, 0, 1, _COLS)
+            cursor_row += 1
+
+        legacy_hdr = QLabel("Legacy Commodity Cost Signals (Daily Status + 1/3/6 Month Context)")
+        legacy_hdr.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 10px;")
+        self._consumer_grid.addWidget(legacy_hdr, cursor_row, 0, 1, _COLS)
+        cursor_row += 1
 
         shown = 0
         for sym, cmap in _CONSUMER_MAP.items():
@@ -1240,19 +1593,19 @@ class MacroView(QWidget):
             effective = abs(pct) * sensitivity
 
             if effective < 0.5:
-                status = "stable"
+                status = f"today stable ({pct:+.1f}%)"
                 color = TEXT_MUTED
             elif pct > 0:
                 if effective >= 2.0:
-                    status = f"up sharply ({pct:+.1f}%)"
+                    status = f"today up sharply ({pct:+.1f}%)"
                 else:
-                    status = f"costs rising ({pct:+.1f}%)"
+                    status = f"today costs rising ({pct:+.1f}%)"
                 color = NEGATIVE  # consumer cost rising is bad
             else:
                 if effective >= 2.0:
-                    status = f"down sharply ({pct:+.1f}%)"
+                    status = f"today down sharply ({pct:+.1f}%)"
                 else:
-                    status = f"costs easing ({pct:+.1f}%)"
+                    status = f"today costs easing ({pct:+.1f}%)"
                 color = POSITIVE  # consumer cost falling is good
 
             chip = QFrame()
@@ -1267,21 +1620,34 @@ class MacroView(QWidget):
             name_lbl.setStyleSheet(f"color: {TEXT_2}; font-size: 10px; background: transparent;")
             status_lbl = QLabel(status)
             status_lbl.setStyleSheet(f"color: {color}; font-size: 11px; font-weight: 600; background: transparent;")
+            p1m = info.get("pct_1m")
+            p3m = info.get("pct_3m")
+            p6m = info.get("pct_6m")
+
+            def _fmt(v):
+                if v is None:
+                    return "--"
+                return f"{v:+.1f}%"
+
+            markers_lbl = QLabel(
+                f"1 Month: {_fmt(p1m)}    3 Month: {_fmt(p3m)}    6 Month: {_fmt(p6m)}"
+            )
+            markers_lbl.setStyleSheet(f"color: {TEXT_1}; font-size: 9px; background: transparent;")
             detail_lbl = QLabel(cmap["detail"])
             detail_lbl.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9px; background: transparent;")
 
             chip_layout.addWidget(name_lbl)
             chip_layout.addWidget(status_lbl)
+            chip_layout.addWidget(markers_lbl)
             chip_layout.addWidget(detail_lbl)
-            row, col = divmod(self._consumer_chip_count, _COLS)
-            self._consumer_grid.addWidget(chip, row, col)
-            self._consumer_chip_count += 1
+            row, col = divmod(shown, _COLS)
+            self._consumer_grid.addWidget(chip, row + cursor_row, col)
             shown += 1
 
         if shown == 0:
-            no_data = QLabel("Loading...")
-            no_data.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px;")
-            self._consumer_grid.addWidget(no_data, 0, 0)
+            no_data_legacy = QLabel("No daily commodity consumer signals available.")
+            no_data_legacy.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px;")
+            self._consumer_grid.addWidget(no_data_legacy, cursor_row, 0, 1, _COLS)
 
     # ── Scenario Analysis ────────────────────────────────────────────────
 
@@ -1290,8 +1656,17 @@ class MacroView(QWidget):
         if not scenario:
             return
         if self._state.agent is None:
+            try:
+                self._mw.retry_agent_init()
+            except Exception:
+                pass
             self._analyse_btn.setEnabled(False)
-            self._scenario_status.setText("Waiting for agent to initialize...")
+            if self._state.agent_init_error:
+                self._scenario_status.setText(
+                    f"Agent init failed ({self._state.agent_init_error[:60]}). Retrying..."
+                )
+            else:
+                self._scenario_status.setText("Waiting for agent to initialize...")
             self._pending_scenario = scenario
             QTimer.singleShot(1000, self._retry_analyse)
             return
@@ -1426,9 +1801,12 @@ class MacroView(QWidget):
             f"6. Note what is already priced in vs. what hasn't moved yet — "
             f"compare across regions (US vs EM pricing efficiency)\n"
             f"7. Provide probability-weighted estimates: "
-            f"'Base case (60%): ... Bull (25%): ... Bear (15%): ...'\n"
+            f"'Base case (60%): ... Bull (25%): ... Bear (15%): ...'. "
+            f"Also add a single line: 'PROBABILITY LAYER: Base XX% | Bull YY% | Bear ZZ%'\n"
             f"8. Suggest specific investment opportunities or hedges across ALL tiers "
-            f"and across global markets (not just US). Include FX hedges where relevant\n\n"
+            f"and across global markets (not just US). Include FX hedges where relevant\n"
+            f"9. End with a short 'ASSUMPTIONS' section (3-6 bullets) and a "
+            f"'CONFIDENCE BANDS' section explaining what would raise/lower confidence\n\n"
             f"Structure your Final Answer with clear PRIMARY IMPACT / SECONDARY IMPACT / "
             f"TERTIARY IMPACT / CONSUMER IMPACT sections."
         )
@@ -1605,6 +1983,9 @@ class MacroView(QWidget):
             prev = info.get("previous")
             name = info["name"]
             unit = info.get("unit", "")
+            src_date = info.get("date", "")
+            fetched_ts = float(info.get("fetched_ts", 0) or 0)
+            age_min = int((time.time() - fetched_ts) / 60) if fetched_ts else None
 
             # Format value
             if unit == "%":
@@ -1617,6 +1998,18 @@ class MacroView(QWidget):
             signal = get_fred_signal(sid, val, prev)
             chip_color = _SIGNAL_COLOR_MAP.get(signal["color"], TEXT_2)
             zone_label = signal["zone_label"]
+            freshness_lbl = "fresh"
+            freshness_color = POSITIVE
+            if age_min is not None:
+                if age_min > 360:
+                    freshness_lbl = f"{age_min // 60}h old"
+                    freshness_color = NEGATIVE
+                elif age_min > 120:
+                    freshness_lbl = f"{age_min}m old"
+                    freshness_color = CAUTION
+                else:
+                    freshness_lbl = f"{age_min}m old"
+                    freshness_color = POSITIVE
 
             change_str = ""
             if prev is not None:
@@ -1641,11 +2034,20 @@ class MacroView(QWidget):
             if zone_label:
                 z_lbl = QLabel(zone_label)
                 z_lbl.setStyleSheet(f"color: {chip_color}; font-size: 9px; background: transparent;")
+            source_parts = []
+            if src_date:
+                source_parts.append(f"as of {src_date}")
+            source_parts.append(freshness_lbl)
+            src_lbl = QLabel(" | ".join(source_parts))
+            src_lbl.setStyleSheet(
+                f"color: {freshness_color}; font-size: 8px; background: transparent;"
+            )
 
             cl.addWidget(n_lbl)
             cl.addWidget(v_lbl)
             if zone_label:
                 cl.addWidget(z_lbl)
+            cl.addWidget(src_lbl)
 
             row, col = divmod(self._indicators_chip_count, _COLS)
             self._indicators_grid.addWidget(chip, row, col)

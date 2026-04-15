@@ -5,6 +5,7 @@ TopNavBar shell with 7-panel stock dashboard, qasync event loop.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
@@ -18,6 +19,8 @@ from PyQt6.QtGui import QKeySequence, QShortcut, QIcon, QPixmap, QPainter, QColo
 from gui.state import AppState
 from gui.theme import ACCENT, BORDER_SUBTLE, SURFACE_1, TEXT_1, TEXT_2
 from services.monitor import run_commodity_monitor, run_monitor
+
+logger = logging.getLogger(__name__)
 
 
 def _make_window_icon() -> QIcon:
@@ -151,6 +154,7 @@ class MainWindow(QMainWindow):
         self._state.load_analysis_history()
         self._state.load_portfolio_snapshots()
         self._state.load_alert_history()
+        self._state.load_alert_metrics()
         self._state.load_commodity_state()
         try:
             self._state.watchlist_refresh_interval = int(
@@ -209,14 +213,16 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
         self._shutting_down = False
+        self._watchlist_refresh_lock = asyncio.Lock()
+        self._agent_init_task: asyncio.Task | None = None
 
         # ── Background tasks ──────────────────────────────────────────────
         self._bg_tasks = [
-            asyncio.ensure_future(self._init_agent()),
             asyncio.ensure_future(run_monitor(self._state, self._show_alert)),
             asyncio.ensure_future(run_commodity_monitor(self._state, self._show_alert)),
             asyncio.ensure_future(self._auto_refresh_loop()),
         ]
+        self.retry_agent_init()
 
     # ── Navigation ────────────────────────────────────────────────────────
 
@@ -248,15 +254,75 @@ class MainWindow(QMainWindow):
 
     # ── Background async tasks ────────────────────────────────────────────
 
+    def retry_agent_init(self) -> None:
+        """Queue agent initialization if not ready and not already running."""
+        if self._state.agent is not None:
+            return
+        if self._agent_init_task is not None and not self._agent_init_task.done():
+            return
+        self._agent_init_task = asyncio.ensure_future(self._init_agent())
+        self._bg_tasks.append(self._agent_init_task)
+
     async def _init_agent(self) -> None:
         loop = asyncio.get_running_loop()
         from agent.core import AgentCore
+        self._state.agent_init_in_progress = True
+        self._state.agent_init_error = ""
+        self._state.agent_init_attempts = 0
+
+        for attempt in range(1, 4):
+            self._state.agent_init_attempts = attempt
+            try:
+                self._state.agent = await loop.run_in_executor(None, AgentCore)
+                await self._prewarm_runtime()
+                self._state.agent_init_error = ""
+                self.show_status("Agent ready", 2500)
+                break
+            except Exception as exc:
+                self._state.agent = None
+                self._state.agent_init_error = str(exc)
+                logger.exception("Agent init attempt %d failed", attempt)
+                await asyncio.sleep(min(attempt, 2))
+        else:
+            self.show_status(
+                f"Agent init failed: {self._state.agent_init_error[:80]}",
+                7000,
+            )
+
+        self._state.agent_init_in_progress = False
+        self._analysis_view.update_provider_label(self._state.detect_provider())
+
+    async def _prewarm_runtime(self) -> None:
+        """Warm high-latency caches once at startup to keep first interaction snappy."""
+        if self._state.agent is None:
+            return
         try:
-            self._state.agent = await loop.run_in_executor(None, AgentCore)
+            await asyncio.wait_for(
+                self._state.agent.memory.search("startup prewarm", top_k=1),
+                timeout=4.0,
+            )
         except Exception:
             pass
-        finally:
-            self._analysis_view.update_provider_label(self._state.detect_provider())
+
+        def _prime_data() -> None:
+            try:
+                from services.research import fetch_eia_petroleum, fetch_fred_indicators
+                fetch_fred_indicators()
+                fetch_eia_petroleum()
+            except Exception:
+                pass
+            try:
+                # Reuse existing macro cache helper used by stock analysis.
+                from tools.stock import _fetch_macro  # pylint: disable=protected-access
+                _fetch_macro()
+            except Exception:
+                pass
+
+        try:
+            loop = asyncio.get_running_loop()
+            await asyncio.wait_for(loop.run_in_executor(None, _prime_data), timeout=8.0)
+        except Exception:
+            pass
 
     def closeEvent(self, event) -> None:
         if self._shutting_down:
@@ -289,6 +355,9 @@ class MainWindow(QMainWindow):
             interval = self._state.watchlist_refresh_interval
             if interval > 0:
                 await asyncio.sleep(interval * 60)
-                await self._watchlist_view.refresh()
+                if self._watchlist_refresh_lock.locked():
+                    continue
+                async with self._watchlist_refresh_lock:
+                    await self._watchlist_view.refresh()
             else:
                 await asyncio.sleep(30)
