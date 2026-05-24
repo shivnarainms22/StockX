@@ -72,7 +72,7 @@ class TopNavBar(QFrame):
 
     nav_changed = pyqtSignal(int)
 
-    _TAB_LABELS = ["Analysis", "Watchlist", "Portfolio", "News", "Earnings", "Markets", "Macro", "Settings"]
+    _TAB_LABELS = ["Analysis", "Watchlist", "Portfolio", "News", "Earnings", "Markets", "Macro", "Backtest", "Settings"]
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -185,6 +185,7 @@ class MainWindow(QMainWindow):
         from gui.views.earnings  import EarningsView
         from gui.views.heatmap   import SectorHeatmapView
         from gui.views.macro     import MacroView
+        from gui.views.backtest  import BacktestView
         from gui.views.settings  import SettingsView
 
         self._analysis_view  = AnalysisView(self._state, self)
@@ -194,17 +195,19 @@ class MainWindow(QMainWindow):
         self._earnings_view  = EarningsView(self._state, self)
         self._heatmap_view   = SectorHeatmapView(self._state, self)
         self._macro_view     = MacroView(self._state, self)
+        self._backtest_view  = BacktestView(self._state, self)
         self._settings_view  = SettingsView(self._state, self)
 
         for view in [
             self._analysis_view, self._watchlist_view, self._portfolio_view,
             self._news_view, self._earnings_view,
-            self._heatmap_view, self._macro_view, self._settings_view,
+            self._heatmap_view, self._macro_view, self._backtest_view,
+            self._settings_view,
         ]:
             self._stack.addWidget(view)
 
-        # ── Keyboard shortcuts — Ctrl+1…8 switch views ──────────
-        for i in range(8):
+        # ── Keyboard shortcuts — Ctrl+1…9 switch views ──────────
+        for i in range(9):
             QShortcut(QKeySequence(f"Ctrl+{i+1}"), self).activated.connect(
                 lambda _=False, idx=i: self._topbar.set_active(idx)
             )
