@@ -84,5 +84,23 @@ class EngineTests(unittest.TestCase):
             self.assertIn(key, res.metrics)
 
 
+@unittest.skipUnless(pd is not None, "pandas not installed")
+class ChartTests(unittest.TestCase):
+    def test_render_equity_curve_returns_png_bytes(self) -> None:
+        from services.charting import render_equity_curve
+        idx = pd.date_range("2020-01-01", periods=30, freq="D")
+        eq = pd.Series([100.0 + i for i in range(30)], index=idx)
+        bm = pd.Series([100.0 + 0.5 * i for i in range(30)], index=idx)
+        png = render_equity_curve(eq, bm)
+        self.assertIsInstance(png, bytes)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_render_equity_curve_short_series_returns_empty(self) -> None:
+        from services.charting import render_equity_curve
+        idx = pd.date_range("2020-01-01", periods=1, freq="D")
+        eq = pd.Series([100.0], index=idx)
+        self.assertEqual(render_equity_curve(eq, eq), b"")
+
+
 if __name__ == "__main__":
     unittest.main()
