@@ -54,3 +54,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
+
+[tool.pytest.ini_options]
+# Confine collection to tests/ so bare `pytest` never scans data/, memory/, or
+# .venv/ (those can contain locked SQLite/ChromaDB files that break collection).
+testpaths = ["tests"]
+norecursedirs = ["data", "memory", ".venv", "build", "dist", "*.egg-info"]
