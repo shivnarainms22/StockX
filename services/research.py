@@ -117,6 +117,37 @@ def fetch_fred_indicators() -> dict[str, dict]:
         return {}
 
 
+def fetch_fred_series(series_id: str, *, limit: int = 1000, frequency: str = "m") -> list[dict]:
+    """Most-recent FRED observations as ascending [{date, value}]. [] if no key/error.
+
+    Fetches in descending order (so `limit` selects the newest observations, not
+    the oldest) then reverses to chronological order.
+    """
+    api_key = os.environ.get("FRED_API_KEY", "").strip()
+    if not api_key:
+        return []
+    try:
+        import httpx
+        resp = httpx.get(
+            "https://api.stlouisfed.org/fred/series/observations",
+            params={
+                "series_id": series_id, "api_key": api_key, "file_type": "json",
+                "sort_order": "desc", "limit": limit,
+                "frequency": frequency, "aggregation_method": "avg",
+            },
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return []
+        obs = resp.json().get("observations", [])
+        cleaned = [{"date": o["date"], "value": o["value"]}
+                   for o in obs if o.get("value", ".") != "."]
+        cleaned.reverse()  # newest-first -> chronological
+        return cleaned
+    except Exception:
+        return []
+
+
 def fetch_eia_petroleum() -> dict:
     """Fetch crude oil weekly inventory from EIA. Returns {} if no key or on error.
 

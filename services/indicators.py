@@ -105,46 +105,69 @@ def calc_fibonacci(high: float, low: float) -> dict[str, float]:
     }
 
 
-# ── New indicator functions ──────────────────────────────────────────────────
+# ── Vectorized series helpers (single source of formulas) ────────────────────
 
-def calc_rsi(hist: Any, period: int = 14) -> float:
-    """Relative Strength Index (0-100)."""
-    delta = hist["Close"].diff()
+def sma_series(close, window: int):
+    """Simple moving average as a full Series."""
+    return close.rolling(window).mean()
+
+
+def ema_series(close, span: int):
+    """Exponential moving average as a full Series."""
+    return close.ewm(span=span, adjust=False).mean()
+
+
+def rsi_series(close, period: int = 14):
+    """RSI (0-100) as a full Series."""
+    delta = close.diff()
     gains = delta.clip(lower=0).ewm(span=period, adjust=False).mean()
     losses = (-delta.clip(upper=0)).ewm(span=period, adjust=False).mean()
     rs = gains / losses
-    rsi = 100 - 100 / (1 + rs)
-    return float(rsi.iloc[-1])
+    return 100 - 100 / (1 + rs)
+
+
+def macd_series(close, fast: int = 12, slow: int = 26, signal: int = 9):
+    """Returns (macd_line, signal_line, histogram) as Series."""
+    ema_fast = close.ewm(span=fast, adjust=False).mean()
+    ema_slow = close.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    return macd_line, signal_line, macd_line - signal_line
+
+
+def bollinger_series(close, period: int = 20, num_std: float = 2.0):
+    """Returns (upper, mid, lower) Bollinger bands as Series."""
+    mid = close.rolling(period).mean()
+    std = close.rolling(period).std()
+    return mid + num_std * std, mid, mid - num_std * std
+
+
+# ── New indicator functions (scalars delegate to the series helpers) ──────────
+
+def calc_rsi(hist: Any, period: int = 14) -> float:
+    """Relative Strength Index (0-100)."""
+    return float(rsi_series(hist["Close"], period).iloc[-1])
 
 
 def calc_macd(
     hist: Any, fast: int = 12, slow: int = 26, signal: int = 9
 ) -> tuple[float, float, float]:
     """Returns (MACD line, signal line, histogram)."""
-    close = hist["Close"]
-    ema_fast = close.ewm(span=fast, adjust=False).mean()
-    ema_slow = close.ewm(span=slow, adjust=False).mean()
-    macd_line = ema_fast - ema_slow
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram = macd_line - signal_line
-    return float(macd_line.iloc[-1]), float(signal_line.iloc[-1]), float(histogram.iloc[-1])
+    ml, sl, hg = macd_series(hist["Close"], fast, slow, signal)
+    return float(ml.iloc[-1]), float(sl.iloc[-1]), float(hg.iloc[-1])
 
 
 def calc_ema(hist: Any, span: int) -> float:
     """Exponential Moving Average of Close."""
-    return float(hist["Close"].ewm(span=span, adjust=False).mean().iloc[-1])
+    return float(ema_series(hist["Close"], span).iloc[-1])
 
 
 def calc_bollinger(
     hist: Any, period: int = 20, num_std: float = 2.0
 ) -> tuple[float, float, float]:
     """Returns (upper band, middle band, lower band)."""
-    close = hist["Close"]
-    mid = close.rolling(period).mean()
-    std = close.rolling(period).std()
-    upper = mid + num_std * std
-    lower = mid - num_std * std
-    return float(upper.iloc[-1]), float(mid.iloc[-1]), float(lower.iloc[-1])
+    u, m, l = bollinger_series(hist["Close"], period, num_std)
+    return float(u.iloc[-1]), float(m.iloc[-1]), float(l.iloc[-1])
 
 
 def calc_annualized_vol(hist: Any, window: int = 30) -> float:

@@ -174,6 +174,135 @@ def render_pnl_chart(snapshots: list[dict]) -> bytes:
         return b""
 
 
+def render_yield_curve(curve) -> bytes:
+    """US Treasury yield curve; inverted curves drawn in the negative color."""
+    if curve is None or len(getattr(curve, "yields", [])) < 2:
+        return b""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        x = list(range(len(curve.labels)))
+        color = NEGATIVE if curve.inverted else ACCENT
+
+        fig, ax = plt.subplots(figsize=(7, 2.8), dpi=110)
+        fig.patch.set_facecolor("none")
+        ax.set_facecolor("none")
+        ax.plot(x, curve.yields, color=color, linewidth=1.8, marker="o",
+                markersize=4, solid_capstyle="round")
+        ax.set_xticks(x)
+        ax.set_xticklabels(curve.labels)
+        _setup_axes(ax)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.1f}%"))
+        plt.tight_layout(pad=0.4)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b""
+
+
+def render_efficient_frontier(result) -> bytes:
+    """Frontier curve + max-Sharpe (star), min-variance (diamond), current (dot)."""
+    if result is None or not result.frontier_vol:
+        return b""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(7, 3.4), dpi=110)
+        fig.patch.set_facecolor("none")
+        ax.set_facecolor("none")
+
+        ax.plot([v * 100 for v in result.frontier_vol],
+                [r * 100 for r in result.frontier_ret],
+                color=ACCENT, linewidth=1.8, solid_capstyle="round", label="Frontier")
+        ms, mv = result.max_sharpe, result.min_var
+        ax.scatter([ms["vol"] * 100], [ms["ret"] * 100], color=POSITIVE,
+                   marker="*", s=160, zorder=5, label="Max Sharpe")
+        ax.scatter([mv["vol"] * 100], [mv["ret"] * 100], color=ACCENT_CYAN,
+                   marker="D", s=70, zorder=5, label="Min Variance")
+        if result.current:
+            ax.scatter([result.current["vol"] * 100], [result.current["ret"] * 100],
+                       color=NEGATIVE, marker="o", s=80, zorder=5, label="Current")
+
+        ax.legend(loc="upper left", framealpha=0, labelcolor=TEXT_2, fontsize=8)
+        _setup_axes(ax)
+        ax.set_xlabel("Volatility (%)", color=TEXT_2, fontsize=8)
+        ax.set_ylabel("Return (%)", color=TEXT_2, fontsize=8)
+        ax.xaxis.grid(True, color=(1, 1, 1, 0.06), linewidth=0.5)
+        plt.tight_layout(pad=0.4)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b""
+
+
+def render_equity_curve(equity, benchmark) -> bytes:
+    """Two-panel chart: strategy vs benchmark (normalised to 100) + drawdown %.
+
+    `equity` and `benchmark` are pandas Series indexed by date. Returns PNG bytes.
+    """
+    if equity is None or len(equity) < 2:
+        return b""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+
+        dates = list(equity.index)
+        e0 = float(equity.iloc[0]) or 1.0
+        strat_norm = [float(v) / e0 * 100 for v in equity]
+
+        fig, (ax1, ax2) = plt.subplots(
+            2, 1, figsize=(8, 3.2), dpi=110,
+            gridspec_kw={"height_ratios": [3, 1]}, sharex=True,
+        )
+        fig.patch.set_facecolor("none")
+        for ax in (ax1, ax2):
+            ax.set_facecolor("none")
+
+        ax1.plot(dates, strat_norm, color=ACCENT, linewidth=1.8,
+                 solid_capstyle="round", label="Strategy")
+        if benchmark is not None and len(benchmark) == len(equity):
+            b0 = float(benchmark.iloc[0]) or 1.0
+            bm_norm = [float(v) / b0 * 100 for v in benchmark]
+            ax1.plot(dates, bm_norm, color=TEXT_2, linewidth=1.2, linestyle="--",
+                     solid_capstyle="round", alpha=0.8, label="Buy & Hold")
+        ax1.legend(loc="upper left", framealpha=0, labelcolor=TEXT_2, fontsize=8)
+        _setup_axes(ax1)
+        ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}"))
+
+        running_max = equity.cummax()
+        dd = (equity / running_max - 1.0) * 100
+        ax2.fill_between(dates, list(dd), 0, color=NEGATIVE, alpha=0.35)
+        _setup_axes(ax2)
+        ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}%"))
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+        ax2.xaxis.set_major_locator(mdates.AutoDateLocator())
+
+        fig.autofmt_xdate(rotation=0, ha="center")
+        plt.tight_layout(pad=0.3)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b""
+
+
 def render_comparison_chart(snapshots: list[dict], benchmark: str = "SPY") -> bytes:
     """Render portfolio vs benchmark overlay, both normalised to 100."""
     if len(snapshots) < 2 or not benchmark:

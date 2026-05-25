@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 import unittest
-import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,10 +12,11 @@ from gui.state import AppState
 
 class AppStateMigrationTests(unittest.TestCase):
     def _make_data_dir(self) -> Path:
-        temp_root = Path("data") / "_test_tmp"
-        temp_root.mkdir(parents=True, exist_ok=True)
-        data_dir = temp_root / str(uuid.uuid4())
-        data_dir.mkdir(parents=True, exist_ok=True)
+        # Use the OS temp dir, never the repo's data/ tree. Writing scratch dirs
+        # under data/ left orphaned, lock-held folders that broke pytest
+        # collection. addCleanup guarantees teardown even on assertion failure.
+        data_dir = Path(tempfile.mkdtemp(prefix="stockx_test_"))
+        self.addCleanup(shutil.rmtree, data_dir, ignore_errors=True)
         return data_dir
 
     def test_legacy_watchlist_migrates_with_new_alert_fields(self) -> None:
