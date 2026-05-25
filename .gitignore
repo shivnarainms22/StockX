@@ -19,6 +19,9 @@ __pycache__/
 dist/
 build/
 
+# Build artifacts
+assets/icon.ico
+
 # Logs
 *.log
 gui_log.txt
