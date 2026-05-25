@@ -8,9 +8,20 @@ import os
 # Ensure the project root is on sys.path so all existing modules resolve
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import paths
+
+# In a windowed PyInstaller build, sys.stdout/stderr are None — faulthandler and
+# the app's print() calls would raise and crash at startup. Redirect them to a
+# log file next to the exe so they are always valid streams.
+if sys.stdout is None or sys.stderr is None:
+    _log_stream = open(paths.data_dir() / "stockx.log", "a", encoding="utf-8", buffering=1)
+    if sys.stdout is None:
+        sys.stdout = _log_stream
+    if sys.stderr is None:
+        sys.stderr = _log_stream
+
 # Load .env before any module reads os.environ (next to the exe when frozen)
 from dotenv import load_dotenv
-import paths
 load_dotenv(paths.dotenv_path())
 
 import asyncio

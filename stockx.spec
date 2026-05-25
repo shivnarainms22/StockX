@@ -1,27 +1,33 @@
 # PyInstaller spec — StockX (one-folder, windowed, portable).
 # Build:  python build.py   (or: pyinstaller stockx.spec --noconfirm)
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+#
+# The ML/embedding stack is EXCLUDED. chromadb pulls sentence-transformers ->
+# torch (gigabytes), which makes the build crawl for many minutes and balloons
+# the bundle. None of it is needed at runtime: memory/store.py falls back to its
+# JSONL backend when chromadb is unavailable. scipy/matplotlib/numpy/yfinance use
+# PyInstaller's reliable built-in hooks, so no collect_all is needed.
+from PyInstaller.utils.hooks import collect_submodules
 
-datas, binaries, hiddenimports = [], [], []
-
-# Heavy deps that PyInstaller's static analysis misses (native libs + data files).
-for pkg in ("chromadb", "onnxruntime", "scipy", "matplotlib", "yfinance"):
-    d, b, h = collect_all(pkg)
-    datas += d
-    binaries += b
-    hiddenimports += h
-
+hiddenimports = []
 hiddenimports += collect_submodules("PyQt6")
+hiddenimports += collect_submodules("plyer")  # dynamic per-platform notification backends
+
+_EXCLUDES = [
+    "chromadb", "onnxruntime",
+    "torch", "torchvision", "torchaudio",
+    "transformers", "sentence_transformers", "tokenizers",
+    "sympy", "tkinter",
+]
 
 a = Analysis(
     ["run_gui.py"],
     pathex=["."],
-    binaries=binaries,
-    datas=datas,
+    binaries=[],
+    datas=[],
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["tkinter"],
+    excludes=_EXCLUDES,
     noarchive=False,
 )
 
