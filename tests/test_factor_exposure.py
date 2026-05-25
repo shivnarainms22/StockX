@@ -39,5 +39,17 @@ class ScenarioTests(unittest.TestCase):
             self.assertTrue(set(shocks) <= valid, f"{name} references unknown factor")
 
 
+@unittest.skipUnless(pd is not None, "numpy/pandas not installed")
+class FactorChartTests(unittest.TestCase):
+    def test_render_returns_png(self) -> None:
+        from services.charting import render_factor_exposure
+        png = render_factor_exposure({"Market": 1.2, "Oil": -0.3, "Gold": 0.4})
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_render_empty_returns_empty(self) -> None:
+        from services.charting import render_factor_exposure
+        self.assertEqual(render_factor_exposure({}), b"")
+
+
 if __name__ == "__main__":
     unittest.main()
