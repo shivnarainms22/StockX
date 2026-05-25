@@ -69,7 +69,7 @@ def fetch_factor_data(portfolio: list[dict], period: str = "1y"):
         closes = data["Close"].dropna(how="all")
     except Exception:
         return None, None
-    returns = closes.pct_change().dropna(how="all")
+    returns = closes.pct_change(fill_method=None).dropna(how="all")
     if returns is None or len(returns) < 30:
         return None, None
 
