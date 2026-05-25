@@ -125,6 +125,16 @@ CHOKEPOINTS: dict[str, dict] = {
         "countries_dependent": ["Russia", "Ukraine", "Kazakhstan", "Romania"],
         "historical_disruption": "2022 Black Sea grain blockade — wheat +60%, corn +30%",
     },
+    "bab_el_mandeb": {
+        "name": "Bab-el-Mandeb",
+        "global_oil_pct": 9,
+        "daily_flow_mbpd": 6.2,
+        "global_trade_pct": 12,
+        "connects": "Red Sea to Gulf of Aden / Arabian Sea (gateway to/from Suez)",
+        "primary_commodities": ["CL=F", "BZ=F", "NG=F"],
+        "countries_dependent": ["Egypt (Suez transit revenue)", "Saudi Arabia", "EU-Asia trade"],
+        "historical_disruption": "2023-24 Houthi attacks rerouted shipping around the Cape of Good Hope (+10-14 days); container freight rates spiked 150%+",
+    },
 }
 
 
@@ -345,6 +355,42 @@ CRISIS_PARALLELS: list[dict] = [
             "Container lines": "+15%",
         },
         "resolution": "Ship freed after 6 days; short-lived but exposed supply chain fragility",
+    },
+    {
+        "name": "2023-24 Red Sea Shipping Crisis",
+        "year": 2023,
+        "trigger": "Houthi missile/drone attacks on shipping in the Bab-el-Mandeb / Red Sea after the Gaza war",
+        "duration_months": 12,
+        "impacts": {
+            "Container freight (Asia-EU)": "+150-300%",
+            "BZ=F": "+5-10% risk premium", "Shipping/tanker rates": "+40%",
+            "EU delivery times": "+10-14 days (Cape of Good Hope reroute)",
+        },
+        "resolution": "Ongoing; ~12% of global trade diverted around Africa; carriers absorbed reroute costs, supply-chain inflation pressure returned",
+    },
+    {
+        "name": "1997 Asian Financial Crisis",
+        "year": 1997,
+        "trigger": "Thai baht devaluation triggered capital flight and currency collapses across East/Southeast Asia",
+        "duration_months": 18,
+        "impacts": {
+            "CL=F": "-40% (demand collapse)", "Asian equities": "-60%",
+            "USD": "+15% (safe haven)", "Industrial metals": "-30%",
+            "GC=F": "-10%",
+        },
+        "resolution": "IMF bailouts (Thailand, Indonesia, South Korea); demand destruction deepened the 1998 oil price low (~$10/bbl)",
+    },
+    {
+        "name": "2010-12 Eurozone Sovereign Debt Crisis",
+        "year": 2010,
+        "trigger": "Greek deficit revelations spread to Ireland, Portugal, Spain, Italy; doubts over euro survival",
+        "duration_months": 30,
+        "impacts": {
+            "EUR": "-20% vs USD", "European banks": "-50%",
+            "GC=F": "+70% (peak 2011, safe haven)", "Peripheral bond yields": "Greek 10y >30%",
+            "CL=F": "volatile, demand fears",
+        },
+        "resolution": "ECB 'whatever it takes' (Draghi, 2012), bailout funds (EFSF/ESM), austerity; tail risk receded",
     },
 ]
 
@@ -572,6 +618,7 @@ def build_knowledge_context(
         "strait_of_malacca": ["malacca", "south china sea", "singapore strait"],
         "panama_canal": ["panama"],
         "turkish_straits": ["bosphorus", "dardanelles", "turkish strait", "black sea"],
+        "bab_el_mandeb": ["bab-el-mandeb", "bab el mandeb", "red sea", "houthi", "gulf of aden"],
     }
 
     for slug, keywords in _CHOKEPOINT_KEYWORDS.items():
@@ -629,6 +676,9 @@ def build_knowledge_context(
         "ukraine": [3], "russia": [3], "invasion": [3],
         "nuclear": [4], "fukushima": [4], "reactor": [4],
         "suez": [5], "canal block": [5],
+        "red sea": [6], "houthi": [6], "bab-el-mandeb": [6], "bab el mandeb": [6],
+        "asian financial": [7], "asian crisis": [7], "baht": [7], "contagion": [7],
+        "eurozone": [8], "sovereign debt": [8], "debt crisis": [8], "greece": [8],
         "war": [0, 3], "conflict": [0, 3], "sanctions": [3],
     }
 
