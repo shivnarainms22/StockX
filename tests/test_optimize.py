@@ -60,5 +60,20 @@ class OptimizeTests(unittest.TestCase):
         self.assertAlmostEqual(res.max_sharpe["weights"][0], 1.0, places=4)
 
 
+@unittest.skipUnless(pd is not None, "scipy/pandas not installed")
+class FrontierChartTests(unittest.TestCase):
+    def test_render_returns_png(self) -> None:
+        from services.charting import render_efficient_frontier
+        df = _returns({"A": (0.0005, 0.01), "B": (0.0003, 0.02)})
+        res = optimize_portfolio(df, current_weights=[0.5, 0.5])
+        png = render_efficient_frontier(res)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
+    def test_render_empty_frontier_returns_empty(self) -> None:
+        from services.charting import render_efficient_frontier
+        empty = OptimizeResult([], [], [], {}, {}, None)
+        self.assertEqual(render_efficient_frontier(empty), b"")
+
+
 if __name__ == "__main__":
     unittest.main()

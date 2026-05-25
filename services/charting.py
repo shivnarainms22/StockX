@@ -174,6 +174,47 @@ def render_pnl_chart(snapshots: list[dict]) -> bytes:
         return b""
 
 
+def render_efficient_frontier(result) -> bytes:
+    """Frontier curve + max-Sharpe (star), min-variance (diamond), current (dot)."""
+    if result is None or not result.frontier_vol:
+        return b""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(7, 3.4), dpi=110)
+        fig.patch.set_facecolor("none")
+        ax.set_facecolor("none")
+
+        ax.plot([v * 100 for v in result.frontier_vol],
+                [r * 100 for r in result.frontier_ret],
+                color=ACCENT, linewidth=1.8, solid_capstyle="round", label="Frontier")
+        ms, mv = result.max_sharpe, result.min_var
+        ax.scatter([ms["vol"] * 100], [ms["ret"] * 100], color=POSITIVE,
+                   marker="*", s=160, zorder=5, label="Max Sharpe")
+        ax.scatter([mv["vol"] * 100], [mv["ret"] * 100], color=ACCENT_CYAN,
+                   marker="D", s=70, zorder=5, label="Min Variance")
+        if result.current:
+            ax.scatter([result.current["vol"] * 100], [result.current["ret"] * 100],
+                       color=NEGATIVE, marker="o", s=80, zorder=5, label="Current")
+
+        ax.legend(loc="upper left", framealpha=0, labelcolor=TEXT_2, fontsize=8)
+        _setup_axes(ax)
+        ax.set_xlabel("Volatility (%)", color=TEXT_2, fontsize=8)
+        ax.set_ylabel("Return (%)", color=TEXT_2, fontsize=8)
+        ax.xaxis.grid(True, color=(1, 1, 1, 0.06), linewidth=0.5)
+        plt.tight_layout(pad=0.4)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b""
+
+
 def render_equity_curve(equity, benchmark) -> bytes:
     """Two-panel chart: strategy vs benchmark (normalised to 100) + drawdown %.
 
