@@ -39,5 +39,19 @@ class NoKeySafetyTests(unittest.TestCase):
             self.assertIsNone(recession_probability())
 
 
+@unittest.skipUnless(np is not None, "scipy/numpy not installed")
+class YieldChartTests(unittest.TestCase):
+    def test_render_returns_png(self) -> None:
+        from services.charting import render_yield_curve
+        from services.yield_curve import YieldCurve
+        curve = YieldCurve(["3M", "2Y", "10Y"], [0.25, 2, 10], [5.2, 4.5, 4.3],
+                           inverted=True, spread_10y_3m=-0.9)
+        self.assertTrue(render_yield_curve(curve).startswith(b"\x89PNG"))
+
+    def test_render_none_returns_empty(self) -> None:
+        from services.charting import render_yield_curve
+        self.assertEqual(render_yield_curve(None), b"")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -174,6 +174,38 @@ def render_pnl_chart(snapshots: list[dict]) -> bytes:
         return b""
 
 
+def render_yield_curve(curve) -> bytes:
+    """US Treasury yield curve; inverted curves drawn in the negative color."""
+    if curve is None or len(getattr(curve, "yields", [])) < 2:
+        return b""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        x = list(range(len(curve.labels)))
+        color = NEGATIVE if curve.inverted else ACCENT
+
+        fig, ax = plt.subplots(figsize=(7, 2.8), dpi=110)
+        fig.patch.set_facecolor("none")
+        ax.set_facecolor("none")
+        ax.plot(x, curve.yields, color=color, linewidth=1.8, marker="o",
+                markersize=4, solid_capstyle="round")
+        ax.set_xticks(x)
+        ax.set_xticklabels(curve.labels)
+        _setup_axes(ax)
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.1f}%"))
+        plt.tight_layout(pad=0.4)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b""
+
+
 def render_efficient_frontier(result) -> bytes:
     """Frontier curve + max-Sharpe (star), min-variance (diamond), current (dot)."""
     if result is None or not result.frontier_vol:
