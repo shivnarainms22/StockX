@@ -14,6 +14,8 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import paths
+
 if TYPE_CHECKING:
     from agent.core import AgentCore
 
@@ -23,7 +25,7 @@ _MAX_ANALYSIS_HISTORY  = 50
 _MAX_ALERT_HISTORY = 200
 _STATE_SCHEMA_VERSION = 2
 
-_DATA_DIR = Path(__file__).parent.parent / "data"
+_DATA_DIR = paths.data_dir()
 
 
 def _backup_path(path: Path) -> Path:

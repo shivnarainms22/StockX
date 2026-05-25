@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget, QSizePolicy,
 )
 
+import paths
 from gui.state import AppState
 from gui.theme import (
     ACCENT, NEGATIVE, POSITIVE,
@@ -26,7 +27,7 @@ from services.diagnostics import snapshot as diagnostics_snapshot
 if TYPE_CHECKING:
     from gui.app import MainWindow
 
-_DOTENV_PATH = Path(__file__).parent.parent.parent / ".env"
+_DOTENV_PATH = paths.dotenv_path()
 
 
 class SettingsView(QWidget):

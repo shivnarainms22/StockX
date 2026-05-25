@@ -45,6 +45,9 @@ voice = [
     "sounddevice>=0.4",
     "numpy>=1.26",
 ]
+build = [
+    "pyinstaller>=6.0",
+]
 
 [project.scripts]
 stockx = "main:main"

@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 
 from PyQt6.QtGui import QKeySequence, QShortcut, QIcon, QPixmap, QPainter, QColor, QPen, QBrush
 
+import paths
 from gui.state import AppState
 from gui.theme import ACCENT, BORDER_SUBTLE, SURFACE_1, TEXT_1, TEXT_2
 from services.monitor import run_commodity_monitor, run_monitor
@@ -58,8 +59,7 @@ def _make_window_icon() -> QIcon:
     p.end()
 
     # Save as .ico so Windows taskbar loads it as a native icon (most reliable)
-    ico_path = Path(__file__).parent.parent / "data" / "icon.ico"
-    ico_path.parent.mkdir(parents=True, exist_ok=True)
+    ico_path = paths.icon_path()
     pix.save(str(ico_path), "ICO")
 
     return QIcon(str(ico_path))

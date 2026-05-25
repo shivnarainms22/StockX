@@ -16,10 +16,12 @@ from typing import Any
 
 import aiofiles
 
+import paths
+
 logger = logging.getLogger(__name__)
 
-_JSONL_PATH = Path(os.getenv("MEMORY_JSONL_PATH", "memory/memory.jsonl"))
-_CHROMA_DIR = os.getenv("MEMORY_CHROMA_DIR", "memory/chroma_db")
+_JSONL_PATH = Path(os.getenv("MEMORY_JSONL_PATH") or paths.memory_dir() / "memory.jsonl")
+_CHROMA_DIR = os.getenv("MEMORY_CHROMA_DIR") or str(paths.memory_dir() / "chroma_db")
 _COLLECTION = "agentx_memory"
 
 # Deduplication: skip adding if cosine distance < this threshold (very similar)
