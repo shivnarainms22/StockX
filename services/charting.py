@@ -174,6 +174,43 @@ def render_pnl_chart(snapshots: list[dict]) -> bytes:
         return b""
 
 
+def render_factor_exposure(betas: dict) -> bytes:
+    """Horizontal bar chart of portfolio factor betas."""
+    if not betas:
+        return b""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        labels = list(betas.keys())
+        values = [betas[k] for k in labels]
+        colors = [ACCENT if v >= 0 else NEGATIVE for v in values]
+        y = list(range(len(labels)))
+
+        fig, ax = plt.subplots(figsize=(6.5, 2.6), dpi=110)
+        fig.patch.set_facecolor("none")
+        ax.set_facecolor("none")
+        ax.barh(y, values, color=colors, height=0.6)
+        ax.axvline(0, color=TEXT_MUTED, linewidth=0.6, alpha=0.5)
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.tick_params(colors=TEXT_2, labelsize=8, length=0)
+        ax.xaxis.grid(True, color=(1, 1, 1, 0.06), linewidth=0.5)
+        ax.set_axisbelow(True)
+        plt.tight_layout(pad=0.4)
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", transparent=True, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return b""
+
+
 def render_yield_curve(curve) -> bytes:
     """US Treasury yield curve; inverted curves drawn in the negative color."""
     if curve is None or len(getattr(curve, "yields", [])) < 2:

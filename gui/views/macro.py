@@ -903,6 +903,57 @@ class _YieldCurvePanel(QFrame):
         self._summary.setStyleSheet(f"color: {color}; font-size: 13px; background: transparent;")
 
 
+class _FactorPanel(QFrame):
+    """Portfolio factor-exposure chart + scenario-stress table."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(
+            f"QFrame {{ background-color: {SURFACE_2}; border: none; border-radius: 14px; }}"
+        )
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(16, 14, 16, 14)
+        self._layout.setSpacing(8)
+        self._msg = QLabel("Analyse your portfolio's exposure to macro factors and stress scenarios.")
+        self._msg.setWordWrap(True)
+        self._msg.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; background: transparent;")
+        self._layout.addWidget(self._msg)
+
+    def show_error(self, msg: str) -> None:
+        self._clear_dynamic()
+        self._msg.setText(msg)
+        self._msg.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; background: transparent;")
+
+    def _clear_dynamic(self) -> None:
+        while self._layout.count() > 1:
+            item = self._layout.takeAt(1)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def show_result(self, png: bytes, r_squared: float,
+                    scenario_rows: list[tuple[str, float]], weighted_line: str | None) -> None:
+        self._clear_dynamic()
+        self._msg.setText("")
+        if png:
+            chart = QLabel()
+            chart.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            chart.setPixmap(QPixmap.fromImage(QImage.fromData(png)))
+            self._layout.addWidget(chart)
+        r2 = QLabel(f"Macro factors explain {r_squared * 100:.0f}% of portfolio variance (R²).")
+        r2.setStyleSheet(f"color: {TEXT_2}; font-size: 12px; background: transparent;")
+        self._layout.addWidget(r2)
+        for name, impact in scenario_rows:
+            color = POSITIVE if impact >= 0 else NEGATIVE
+            lbl = QLabel(f"{name}: portfolio {impact:+.1f}%")
+            lbl.setStyleSheet(f"color: {color}; font-size: 13px; background: transparent;")
+            self._layout.addWidget(lbl)
+        if weighted_line:
+            wl = QLabel(weighted_line)
+            wl.setWordWrap(True)
+            wl.setStyleSheet(f"color: {CAUTION}; font-size: 12px; background: transparent;")
+            self._layout.addWidget(wl)
+
+
 # ── Main View ────────────────────────────────────────────────────────────────
 
 class MacroView(QWidget):
@@ -1046,6 +1097,25 @@ class MacroView(QWidget):
         )
         yc_btn.clicked.connect(lambda: asyncio.ensure_future(self._compute_yield_curve()))
         self._body_layout.addWidget(yc_btn)
+
+        # ── Portfolio Factor Exposure & Scenario Stress section ───────────
+        self._body_layout.addSpacing(12)
+        fx_lbl = QLabel("PORTFOLIO FACTOR EXPOSURE & SCENARIO STRESS")
+        fx_lbl.setStyleSheet(
+            f"color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px;"
+        )
+        self._body_layout.addWidget(fx_lbl)
+        self._factor_panel = _FactorPanel()
+        self._body_layout.addWidget(self._factor_panel)
+        fx_btn = QPushButton("Analyse Factor Exposure")
+        fx_btn.setFixedHeight(30)
+        fx_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none;"
+            f"border-radius: 10px; padding: 6px 16px; font-size: 12px; }}"
+            f"QPushButton:hover {{ background: {SURFACE_3}; }}"
+        )
+        fx_btn.clicked.connect(lambda: asyncio.ensure_future(self._compute_factor_exposure()))
+        self._body_layout.addWidget(fx_btn)
 
         # ── Scenario Analysis section ─────��─────────────────────────────���─
         self._body_layout.addSpacing(12)
@@ -1987,6 +2057,49 @@ class MacroView(QWidget):
             if p >= 30:
                 color = NEGATIVE
         self._yield_panel.show_result(png, " ".join(parts), color)
+
+    # ── Portfolio Factor Exposure & Scenario Stress ──────────────────────
+
+    async def _compute_factor_exposure(self) -> None:
+        """Multi-factor regression of the portfolio + scenario stress (off-thread)."""
+        from services.factor_exposure import (
+            compute_factor_betas, scenario_impact, fetch_factor_data, SCENARIOS,
+        )
+        from services.charting import render_factor_exposure
+
+        if not self._state.portfolio:
+            self._factor_panel.show_error("No portfolio holdings — add some in Portfolio view.")
+            return
+
+        loop = asyncio.get_event_loop()
+        port, factors = await loop.run_in_executor(
+            None, fetch_factor_data, self._state.portfolio
+        )
+        if port is None:
+            self._factor_panel.show_error("Not enough price history to compute factor exposure.")
+            return
+
+        res = compute_factor_betas(port, factors)
+        betas = res["betas"]
+        png = render_factor_exposure(betas)
+        rows = [(name, scenario_impact(betas, shocks) * 100)
+                for name, shocks in SCENARIOS.items()]
+
+        weighted = None
+        try:
+            from services.yield_curve import recession_probability
+            rec = await loop.run_in_executor(None, recession_probability)
+            if rec is not None:
+                rec_impact = scenario_impact(betas, SCENARIOS["2008-style Recession"]) * 100
+                weighted = (
+                    f"Recession-probability-weighted impact: "
+                    f"{rec['probability'] * rec_impact:+.2f}% "
+                    f"(P={rec['probability'] * 100:.0f}% x {rec_impact:+.1f}%)"
+                )
+        except Exception:
+            pass
+
+        self._factor_panel.show_result(png, res["r_squared"], rows, weighted)
 
     # ── Correlation Matrix (Phase 5) ─────────────────────────────────────
 
