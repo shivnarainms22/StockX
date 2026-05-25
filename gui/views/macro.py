@@ -877,6 +877,32 @@ class _RiskMetricsPanel(QFrame):
         self._content_label.show()
 
 
+class _YieldCurvePanel(QFrame):
+    """US Treasury yield curve + recession-probability summary."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(
+            f"QFrame {{ background-color: {SURFACE_2}; border: none; border-radius: 14px; }}"
+        )
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(16, 14, 16, 14)
+        self._chart = QLabel("Load the yield curve to see recession risk.")
+        self._chart.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 12px; background: transparent;")
+        self._chart.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._summary = QLabel("")
+        self._summary.setWordWrap(True)
+        self._summary.setStyleSheet(f"color: {TEXT_1}; font-size: 13px; background: transparent;")
+        self._layout.addWidget(self._chart)
+        self._layout.addWidget(self._summary)
+
+    def show_result(self, png: bytes, summary: str, color: str) -> None:
+        if png:
+            self._chart.setPixmap(QPixmap.fromImage(QImage.fromData(png)))
+        self._summary.setText(summary)
+        self._summary.setStyleSheet(f"color: {color}; font-size: 13px; background: transparent;")
+
+
 # ── Main View ────────────────────────────────────────────────────────────────
 
 class MacroView(QWidget):
@@ -1001,6 +1027,25 @@ class MacroView(QWidget):
         )
         self._risk_compute_btn = compute_risk_btn
         self._body_layout.addWidget(compute_risk_btn)
+
+        # ── Yield Curve & Recession Risk section ──────────────────────────
+        self._body_layout.addSpacing(12)
+        yc_lbl = QLabel("YIELD CURVE & RECESSION RISK")
+        yc_lbl.setStyleSheet(
+            f"color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px;"
+        )
+        self._body_layout.addWidget(yc_lbl)
+        self._yield_panel = _YieldCurvePanel()
+        self._body_layout.addWidget(self._yield_panel)
+        yc_btn = QPushButton("Load Yield Curve")
+        yc_btn.setFixedHeight(30)
+        yc_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none;"
+            f"border-radius: 10px; padding: 6px 16px; font-size: 12px; }}"
+            f"QPushButton:hover {{ background: {SURFACE_3}; }}"
+        )
+        yc_btn.clicked.connect(lambda: asyncio.ensure_future(self._compute_yield_curve()))
+        self._body_layout.addWidget(yc_btn)
 
         # ── Scenario Analysis section ─────��─────────────────────────────���─
         self._body_layout.addSpacing(12)
@@ -1915,6 +1960,33 @@ class MacroView(QWidget):
             self._risk_panel.show_error(f"Error computing risk: {exc}")
         finally:
             self._risk_compute_btn.setEnabled(True)
+
+    # ── Yield Curve & Recession Risk ─────────────────────────────────────
+
+    async def _compute_yield_curve(self) -> None:
+        """Fetch the Treasury curve + recession probability (blocking work off-thread)."""
+        from services.yield_curve import fetch_yield_curve, recession_probability
+        from services.charting import render_yield_curve
+
+        loop = asyncio.get_event_loop()
+        curve = await loop.run_in_executor(None, fetch_yield_curve)
+        if curve is None:
+            self._yield_panel.show_result(
+                b"", "Add a FRED API key in Settings for yield-curve data.", TEXT_MUTED
+            )
+            return
+
+        rec = await loop.run_in_executor(None, recession_probability)
+        png = render_yield_curve(curve)
+        shape = "inverted" if curve.inverted else "normal"
+        parts = [f"Curve is {shape} (10y-3m spread {curve.spread_10y_3m:+.2f}%)."]
+        color = NEGATIVE if curve.inverted else POSITIVE
+        if rec is not None:
+            p = rec["probability"] * 100
+            parts.append(f"12-month recession probability: {p:.0f}%.")
+            if p >= 30:
+                color = NEGATIVE
+        self._yield_panel.show_result(png, " ".join(parts), color)
 
     # ── Correlation Matrix (Phase 5) ─────────────────────────────────────
 
