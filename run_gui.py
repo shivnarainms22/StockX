@@ -8,9 +8,10 @@ import os
 # Ensure the project root is on sys.path so all existing modules resolve
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Load .env before any module reads os.environ
+# Load .env before any module reads os.environ (next to the exe when frozen)
 from dotenv import load_dotenv
-load_dotenv()
+import paths
+load_dotenv(paths.dotenv_path())
 
 import asyncio
 import faulthandler
@@ -61,9 +62,8 @@ if __name__ == "__main__":
         # processEvents() ensures the window's taskbar button is created before we set the icon.
         if sys.platform == "win32":
             import ctypes
-            from pathlib import Path
             QApplication.processEvents()   # let Qt create the native window + taskbar button
-            ico_path = Path(__file__).parent / "data" / "icon.ico"
+            ico_path = paths.icon_path()
             if ico_path.exists():
                 IMAGE_ICON = 1
                 LR_LOADFROMFILE = 0x00000010

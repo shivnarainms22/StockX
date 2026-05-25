@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 
+import paths
 from gui.state import AppState, Message
 from services.diagnostics import snapshot as diagnostics_snapshot
 from gui.theme import (
@@ -29,7 +30,7 @@ from gui.theme import (
 if TYPE_CHECKING:
     from gui.app import MainWindow
 
-_EXPORTS_DIR = Path(__file__).parent.parent.parent / "data" / "exports"
+_EXPORTS_DIR = paths.exports_dir()
 
 
 # ── AnalysisWorker ────────────────────────────────────────────────────────────
@@ -265,7 +266,7 @@ class AnalysisView(QWidget):
             h.addWidget(btn)
 
         # Session resume chip (item 1)
-        session_path = Path(__file__).parent.parent.parent / "data" / "session.json"
+        session_path = paths.data_dir() / "session.json"
         if session_path.exists():
             resume_btn = _chip_btn("↩ Resume Session")
             resume_btn.setStyleSheet(

@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
-load_dotenv()
+import paths
+load_dotenv(paths.dotenv_path())
 
 import sys
 
