@@ -64,3 +64,6 @@ packages = ["."]
 # .venv/ (those can contain locked SQLite/ChromaDB files that break collection).
 testpaths = ["tests"]
 norecursedirs = ["data", "memory", ".venv", "build", "dist", "*.egg-info"]
+# Put the repo root on sys.path so tests can import the top-level packages
+# (services, gui, paths, ...) under plain `pytest`, not just `python -m pytest`.
+pythonpath = ["."]
