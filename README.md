@@ -15,6 +15,10 @@ A local AI agent for Windows with a fintech-style dark GUI. Performs stock analy
 - **Geopolitical Scenario Analysis** — type a scenario (e.g., "Iran closes Strait of Hormuz") and get AI-driven multi-tier global impact analysis enriched with curated economic knowledge, FRED/EIA data, and crisis parallels
 - **Consumer Inflation Engine** — commodity-to-consumer pass-through model covering 14 mappings with sensitivity-weighted thresholds
 - **Risk Metrics** — VaR (95%/99%), max drawdown, commodity betas, stress tests, and 90-day rolling correlation matrix
+- **Backtesting** — vectorized, lookahead-safe engine for technical strategies (SMA/EMA/MACD crossover, RSI & Bollinger reversion) with an equity-curve-vs-buy-and-hold chart and a full metrics tearsheet (Sharpe, Sortino, CAGR, max drawdown, win rate)
+- **Portfolio Optimization** — Markowitz mean-variance (scipy) efficient frontier with max-Sharpe and min-variance portfolios and a current → suggested rebalancing table
+- **Yield Curve & Recession Risk** — US Treasury yield curve with inversion detection and a NY-Fed-style recession-probability model (probit fit on live FRED data)
+- **Factor Exposure & Scenario Stress** — multivariate regression of your portfolio against macro factors (market, oil, gold, rates, USD) with named multi-factor stress scenarios (recession, oil shock, rate hike, risk-off, soft landing)
 - **Earnings Calendar** — upcoming earnings dates in a grid view
 - **Sector Heatmap** — 18 sector ETFs with colour-coded daily performance
 - **Financial News** — aggregated headlines with sentiment scoring
@@ -72,7 +76,7 @@ Optional keys for enhanced functionality:
 python run_gui.py
 ```
 
-Navigate between views with the top nav bar or keyboard shortcuts `Ctrl+1` through `Ctrl+8`:
+Navigate between views with the top nav bar or keyboard shortcuts `Ctrl+1` through `Ctrl+9`:
 
 | Shortcut | View |
 |----------|------|
@@ -83,14 +87,29 @@ Navigate between views with the top nav bar or keyboard shortcuts `Ctrl+1` throu
 | Ctrl+5 | Earnings |
 | Ctrl+6 | Markets (Heatmap) |
 | Ctrl+7 | Macro |
-| Ctrl+8 | Settings |
+| Ctrl+8 | Backtest |
+| Ctrl+9 | Settings |
+
+> Portfolio Optimization is launched from the **Optimize** button in the Portfolio view; Yield Curve / Recession Risk and Factor Exposure / Scenario Stress are sections within the **Macro** view.
+
+## Desktop Build (Windows)
+
+Build a portable, self-contained Windows app (no Python install needed to run it):
+
+```bash
+pip install -e ".[build]"
+python build.py
+```
+
+This produces `dist/StockX/StockX.exe`. The build is **portable** — `data/`, `memory/`, and `.env` live next to the exe, so the bundle is self-contained and never touches your dev copy. Drop a `.env` (or set keys in the Settings tab) beside the exe to configure it.
 
 ## Architecture
 
 ```
 run_gui.py                  ← GUI launcher (qasync event loop)
+paths.py                    ← frozen-aware path resolution (dev = repo root; frozen = next to exe)
 gui/app.py                  ← MainWindow, top nav bar, agent init retry
-gui/views/                  ← Analysis, Watchlist, Portfolio, News, Earnings, Heatmap, Macro, Settings
+gui/views/                  ← Analysis, Watchlist, Portfolio, News, Earnings, Heatmap, Macro, Backtest, Settings
 gui/state.py                ← AppState with atomic persistence, schema versioning, backup recovery
 gui/theme.py                ← Dark/light stylesheets, color constants, currency formatting
 
@@ -103,11 +122,16 @@ memory/store.py             ← ChromaDB + JSONL memory backend
 services/monitor.py         ← Background watchlist + commodity price monitor
 services/research.py        ← FRED + EIA API clients with TTL cache
 services/knowledge.py       ← Curated economic knowledge (chokepoints, crises, trade flows)
-services/indicators.py      ← Technical indicators (RSI, MACD, Bollinger, ATR, ADX, etc.)
+services/indicators.py      ← Technical indicators (RSI, MACD, Bollinger, ATR, ADX, + vectorized series)
 services/macro_signals.py   ← Contextual signal engine (good/bad coloring by economic meaning)
 services/macro_charts.py    ← Correlation heatmap renderer
 services/consumer_inflation.py ← Commodity-to-consumer pass-through model
-services/charting.py        ← matplotlib chart rendering (portfolio, sparklines, P&L)
+services/backtest.py        ← Vectorized lookahead-safe backtest engine + strategies
+services/perf_metrics.py    ← Pure performance/risk metrics (Sharpe, Sortino, drawdown, alpha/beta)
+services/optimize.py        ← scipy mean-variance portfolio optimizer (efficient frontier)
+services/yield_curve.py     ← Treasury yield curve + FRED-fitted recession probit
+services/factor_exposure.py ← Multivariate factor betas + scenario stress library
+services/charting.py        ← matplotlib chart rendering (portfolio, sparklines, P&L, equity curve, frontier)
 services/sentiment.py       ← Lexicon-based headline sentiment scorer
 services/notifications.py   ← Desktop toast notifications via plyer
 services/diagnostics.py     ← Tool call timing and diagnostics
