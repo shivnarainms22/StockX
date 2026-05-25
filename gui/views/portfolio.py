@@ -129,6 +129,14 @@ class PortfolioView(QWidget):
             lambda: asyncio.get_event_loop().create_task(self._refresh())
         )
 
+        self._optimize_btn = QPushButton("Optimize")
+        self._optimize_btn.setFixedHeight(30)
+        self._optimize_btn.setStyleSheet(
+            f"QPushButton {{ color: {TEXT_2}; background: {SURFACE_2}; border: none; border-radius: 10px; padding: 6px 16px; font-size: 13px; }}"
+            f"QPushButton:hover {{ background: {SURFACE_3}; }}"
+        )
+        self._optimize_btn.clicked.connect(self._open_optimize)
+
         add_btn = QPushButton("+ Add Holding")
         add_btn.setFixedHeight(30)
         add_btn.setStyleSheet(
@@ -138,9 +146,21 @@ class PortfolioView(QWidget):
         )
         add_btn.clicked.connect(self._open_add_dialog)
 
-        for w in [self._refresh_btn, add_btn]:
+        for w in [self._refresh_btn, self._optimize_btn, add_btn]:
             h.addWidget(w)
         return header
+
+    def _open_optimize(self) -> None:
+        """Open the portfolio optimizer (non-modal) seeded with current holdings."""
+        from gui.views.optimize import OptimizePanel
+        tickers = [h["ticker"] for h in self._state.portfolio]
+        # Value-weights from last-refreshed prices; equal-weight if none available.
+        values = [self._prices.get(h["ticker"], 0.0) * h.get("qty", 0)
+                  for h in self._state.portfolio]
+        total = sum(values)
+        weights = [v / total for v in values] if total > 0 else None
+        self._optimize_panel = OptimizePanel(tickers, weights)
+        self._optimize_panel.show()   # non-modal, never .exec()
 
     def _build_summary_bar(self) -> QFrame:
         bar = QFrame()
