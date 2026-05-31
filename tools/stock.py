@@ -993,13 +993,10 @@ class StockTool(BaseTool):
             elif roc < -10: tech_sigs.append(f"ROC {roc:.1f}% — negative momentum")
             tech_sigs.append(f"Weekly trend: {weekly_trend}")
 
-            # Fundamental scoring (max ~25)
-            if ret_1y and ret_1y > 0.30:  fund_score += 3; fund_sigs.append(f"Exceptional 1-year return {_p(ret_1y)}")
-            elif ret_1y and ret_1y > 0.15: fund_score += 2; fund_sigs.append(f"Strong 1-year return {_p(ret_1y)}")
-            elif ret_1y and ret_1y > 0:    fund_score += 1; fund_sigs.append(f"Positive 1-year return {_p(ret_1y)}")
-            elif ret_1y and ret_1y < -0.25: fund_score -= 2; fund_sigs.append(f"Poor 1-year return {_p(ret_1y)}")
-            if ret_2y > 0.30: fund_score += 2; fund_sigs.append(f"Strong 2-year return {_p(ret_2y)} — sustained momentum")
-            elif ret_2y > 0:  fund_score += 1; fund_sigs.append(f"Positive 2-year return {_p(ret_2y)}")
+            # Fundamental scoring (max ~20). NOTE: 1y/2y price returns are momentum,
+            # not fundamentals — they live in the technical leg (price vs MAs, ROC,
+            # 1m return). Keeping them here double-weighted momentum and made the
+            # composite blind to valuation; see validation/AUDIT_REPORT.md.
             if rev_growth and rev_growth > 0.20: fund_score += 3; fund_sigs.append(f"Revenue growing {_p(rev_growth)} YoY — strong expansion")
             elif rev_growth and rev_growth > 0.08: fund_score += 2; fund_sigs.append(f"Revenue growing {_p(rev_growth)} YoY")
             elif rev_growth and rev_growth > 0:    fund_score += 1; fund_sigs.append(f"Revenue growing {_p(rev_growth)} YoY")

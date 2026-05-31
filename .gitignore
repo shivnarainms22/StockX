@@ -46,3 +46,4 @@ docs/superpowers/
 # audit run artifact (regenerable via validation/audit.py)
 validation/audit_findings.json
 validation/audit_macro_findings.json
+validation/audit_agent_findings.json
