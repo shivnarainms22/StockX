@@ -6,6 +6,12 @@ technical indicators, the Risk Metrics panel, the correlation matrix, the
 knowledge base (facts + injection), and the LLM geopolitical scenario engine.
 **Reproduce:** `python validation/audit_macro.py` (+ `pytest tests/validation/`).
 
+> **Status update — fixes applied (branch `fix/audit-findings`):** RSI/ATR/ADX now use
+> Wilder smoothing and match the reference exactly (signal flips gone); the commodity
+> beta now uses a consistent ddof; `build_knowledge_context` now chains a chokepoint to
+> its primary commodities; the Hormuz throughput field is reconciled to 21 Mbpd. The
+> findings below are preserved as the pre-fix record.
+
 ---
 
 ## Executive verdict

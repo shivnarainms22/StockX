@@ -9,13 +9,13 @@ from typing import Any
 
 
 def calc_atr(hist: Any, period: int = 14) -> float:
-    """Average True Range."""
+    """Average True Range (Wilder-smoothed, the standard definition)."""
     high, low, close = hist["High"], hist["Low"], hist["Close"]
     prev_close = close.shift(1)
     tr = (high - low).combine(
         (high - prev_close).abs(), max
     ).combine((low - prev_close).abs(), max)
-    return float(tr.rolling(period).mean().iloc[-1])
+    return float(tr.ewm(alpha=1 / period, adjust=False).mean().iloc[-1])
 
 
 def calc_adx(hist: Any, period: int = 14) -> tuple[float, float, float]:
@@ -31,11 +31,12 @@ def calc_adx(hist: Any, period: int = 14) -> tuple[float, float, float]:
     tr = (high - low).combine((high - prev_close).abs(), max).combine(
         (low - prev_close).abs(), max
     )
-    atr = tr.ewm(span=period, adjust=False).mean()
-    plus_di = 100 * plus_dm.ewm(span=period, adjust=False).mean() / atr
-    minus_di = 100 * minus_dm.ewm(span=period, adjust=False).mean() / atr
+    # Wilder smoothing (alpha=1/period) — the standard ADX/DI definition.
+    atr = tr.ewm(alpha=1 / period, adjust=False).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
+    minus_di = 100 * minus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
-    adx = dx.ewm(span=period, adjust=False).mean()
+    adx = dx.ewm(alpha=1 / period, adjust=False).mean()
     return float(adx.iloc[-1]), float(plus_di.iloc[-1]), float(minus_di.iloc[-1])
 
 
@@ -118,10 +119,11 @@ def ema_series(close, span: int):
 
 
 def rsi_series(close, period: int = 14):
-    """RSI (0-100) as a full Series."""
+    """RSI (0-100) as a full Series. Wilder smoothing (alpha=1/period) — the
+    standard RSI definition used by charting platforms and the 70/30 thresholds."""
     delta = close.diff()
-    gains = delta.clip(lower=0).ewm(span=period, adjust=False).mean()
-    losses = (-delta.clip(upper=0)).ewm(span=period, adjust=False).mean()
+    gains = delta.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
+    losses = (-delta.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
     rs = gains / losses
     return 100 - 100 / (1 + rs)
 

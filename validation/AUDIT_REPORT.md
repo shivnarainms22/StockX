@@ -4,6 +4,15 @@
 **Universe:** 15 tickers across 7 sectors (Tech, Energy, Financials, Healthcare, Staples, Utilities, Industrials), folding in the user's real AAPL/AMZN/MSFT holdings.
 **Reproduce:** `python validation/audit.py` → writes `validation/audit_findings.json`.
 
+> **Status update (branch `fix/audit-findings`):** the valuation blind spot (W1) is
+> addressed — a `_valuation_score(upside, pe_fwd)` component now scores analyst upside
+> symmetrically (no dead zone) and penalizes rich forward multiples, so negative-upside
+> names (AAPL, GS) are docked and flagged. Note: the *composite* score remains, by
+> design, a quality + momentum ranker (trailing returns are weighted in both the
+> technical and fundamental legs), so it still does not strongly *correlate* with pure
+> analyst upside — forcing that would distort a coherent style. Rebalancing the
+> momentum weighting is a separate product decision, deliberately not made here.
+
 ---
 
 ## Executive verdict
