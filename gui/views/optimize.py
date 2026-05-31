@@ -10,11 +10,16 @@ from PyQt6.QtWidgets import (
 from gui.theme import NEGATIVE, POSITIVE, TEXT_1, TEXT_2
 from services.optimize import fetch_returns, optimize_portfolio
 
+# Cap any single suggested position so the optimizer can't dump everything into
+# one name (mean-variance's classic concentration failure).
+_MAX_WEIGHT = 0.35
+
 
 def _run_optimize_job(returns_df, current_weights):
     """Pure: optimize + render. Returns (OptimizeResult, png_bytes)."""
     from services.charting import render_efficient_frontier
-    result = optimize_portfolio(returns_df, current_weights=current_weights)
+    result = optimize_portfolio(
+        returns_df, current_weights=current_weights, max_weight=_MAX_WEIGHT)
     return result, render_efficient_frontier(result)
 
 
