@@ -48,6 +48,10 @@ voice = [
 build = [
     "pyinstaller>=6.0",
 ]
+validate = [
+    "empyrical-reloaded>=0.5.11",
+    "statsmodels>=0.14",
+]
 
 [project.scripts]
 stockx = "main:main"
