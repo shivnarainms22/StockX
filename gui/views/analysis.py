@@ -22,6 +22,7 @@ from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 import paths
 from gui.state import AppState, Message
 from services.diagnostics import snapshot as diagnostics_snapshot
+from services.indicators import calc_rsi
 from gui.theme import (
     ACCENT, ACCENT_CYAN, ACCENT_GLOW, APP_BG, BORDER_CARD, BORDER_INPUT, CAUTION,
     BORDER_SUBTLE, NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, TEXT_1, TEXT_MUTED, TEXT_2,
@@ -952,10 +953,7 @@ class AnalysisView(QWidget):
                     price = float(fi.last_price or 0)
                     prev  = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price
                     chg   = ((price - prev) / prev * 100) if prev else 0.0
-                    delta  = hist["Close"].diff()
-                    gains  = delta.clip(lower=0).rolling(14).mean()
-                    losses = (-delta.clip(upper=0)).rolling(14).mean()
-                    rsi    = float((100 - 100 / (1 + gains / losses)).iloc[-1])
+                    rsi    = calc_rsi(hist)  # Wilder-smoothed, shared with analysis core
                     pe     = info.get("trailingPE") or info.get("forwardPE")
                     mcap   = fi.market_cap or 0
                     rows.append((t, price, chg, rsi, pe, mcap))
