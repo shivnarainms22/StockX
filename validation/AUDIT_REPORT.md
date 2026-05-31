@@ -8,10 +8,17 @@
 > addressed — a `_valuation_score(upside, pe_fwd)` component now scores analyst upside
 > symmetrically (no dead zone) and penalizes rich forward multiples, so negative-upside
 > names (AAPL, GS) are docked and flagged. Note: the *composite* score remains, by
-> design, a quality + momentum ranker (trailing returns are weighted in both the
-> technical and fundamental legs), so it still does not strongly *correlate* with pure
-> analyst upside — forcing that would distort a coherent style. Rebalancing the
-> momentum weighting is a separate product decision, deliberately not made here.
+> design, a quality + momentum ranker. **Momentum rebalance now applied:** the 1y/2y
+> price-return points were removed from the *fundamental* leg (they are momentum, not
+> fundamentals, and were double-weighting trend — which the technical MAs already
+> capture). Effect on the 15-name universe: analyst-consensus agreement rose (ρ
+> +0.65→+0.71), momentum grip fell (1y-return ρ +0.48→+0.28), and AAPL dropped out of
+> STRONG BUY (→BUY) given its 0% upside. Score-vs-upside ρ stays ~0.08 — now an
+> established result, not a defect: analyst upside behaves as a *value* factor (the
+> high-upside names are cheap energy majors with mediocre fundamentals), genuinely
+> orthogonal to the quality+sentiment the score measures. Tier thresholds were kept
+> (lowering them would just re-inflate AAPL), yielding a more conservative, honest
+> distribution (2 STRONG BUYs vs the prior "everything is BUY+").
 
 ---
 
