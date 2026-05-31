@@ -202,6 +202,34 @@ def _rating_for_total_score(total_score: float) -> str:
     return "AVOID"
 
 
+def _valuation_score(upside: float | None, pe_fwd: float | None) -> tuple[int, list[str]]:
+    """Score analyst-implied upside and forward valuation.
+
+    Symmetric upside scoring with no dead zone (so the composite actually tracks
+    valuation), plus a rich-multiple penalty so 'priced for perfection' names
+    don't earn top tiers on momentum and quality alone. Returns (points, signals).
+    """
+    pts = 0
+    sigs: list[str] = []
+    if upside is not None:
+        if upside > 0.25:
+            pts += 3; sigs.append(f"Analyst target implies {upside:+.0%} upside — strong")
+        elif upside > 0.12:
+            pts += 2; sigs.append(f"Analyst target implies {upside:+.0%} upside")
+        elif upside > 0.04:
+            pts += 1; sigs.append(f"Analyst target implies {upside:+.0%} upside")
+        elif upside < -0.10:
+            pts -= 3; sigs.append(f"Trades {upside:+.0%} vs analyst target — material downside risk")
+        elif upside < 0.0:
+            pts -= 1; sigs.append(f"At/above analyst target ({upside:+.0%}) — little upside left")
+    if pe_fwd and pe_fwd > 0:
+        if pe_fwd > 50:
+            pts -= 2; sigs.append(f"Forward P/E {pe_fwd:.0f} — richly valued, priced for perfection")
+        elif pe_fwd > 35:
+            pts -= 1; sigs.append(f"Forward P/E {pe_fwd:.0f} — elevated valuation")
+    return pts, sigs
+
+
 def clear_ticker_cache(ticker: str | None = None) -> None:
     """Invalidate cache for one ticker or all tickers."""
     if ticker is None:
@@ -339,6 +367,7 @@ def _n(v: float | None, dec: int = 2) -> str:
 from services.indicators import (
     calc_atr as _calc_atr,
     calc_adx as _calc_adx,
+    calc_rsi as _calc_rsi,
     calc_stochastic as _calc_stochastic,
     calc_roc as _calc_roc,
     calc_obv as _calc_obv,
@@ -491,9 +520,7 @@ class StockTool(BaseTool):
                 else:
                     ret_3m = 0.0
 
-                delta = hist["Close"].diff()
-                rsi   = float((100 - 100 / (1 + delta.clip(lower=0).rolling(14).mean() /
-                               (-delta.clip(upper=0)).rolling(14).mean())).iloc[-1])
+                rsi   = _calc_rsi(hist)
                 score += 2 if 40 <= rsi <= 65 else (1 if rsi < 38 else 0)
 
                 try: adx, pdi, mdi = _calc_adx(hist)
@@ -601,9 +628,7 @@ class StockTool(BaseTool):
         ma20  = float(hist["Close"].rolling(20).mean().iloc[-1])
         ma50  = float(hist["Close"].rolling(50).mean().iloc[-1])
         ma200 = float(hist["Close"].rolling(200).mean().iloc[-1])
-        delta = hist["Close"].diff()
-        rsi   = float((100 - 100 / (1 + delta.clip(lower=0).rolling(14).mean() /
-                       (-delta.clip(upper=0)).rolling(14).mean())).iloc[-1])
+        rsi   = _calc_rsi(hist)
         ema12 = hist["Close"].ewm(span=12, adjust=False).mean()
         ema26 = hist["Close"].ewm(span=26, adjust=False).mean()
         macd_bull = float((ema12 - ema26).iloc[-1]) > float((ema12 - ema26).ewm(span=9).mean().iloc[-1])
@@ -811,10 +836,7 @@ class StockTool(BaseTool):
             ema20 = float(hist["Close"].ewm(span=20, adjust=False).mean().iloc[-1])
             ema50 = float(hist["Close"].ewm(span=50, adjust=False).mean().iloc[-1])
 
-            delta = hist["Close"].diff()
-            gain  = delta.clip(lower=0).rolling(14).mean()
-            loss  = (-delta.clip(upper=0)).rolling(14).mean()
-            rsi   = float((100 - 100 / (1 + gain / loss)).iloc[-1])
+            rsi   = _calc_rsi(hist)
 
             ema12 = hist["Close"].ewm(span=12, adjust=False).mean()
             ema26 = hist["Close"].ewm(span=26, adjust=False).mean()
@@ -997,10 +1019,9 @@ class StockTool(BaseTool):
             elif rec_mean and rec_mean <= 2.2: fund_score += 2; fund_sigs.append(f"Analyst consensus BUY ({rec_mean:.1f}/5) — {n_analysts} analysts")
             elif rec_mean and rec_mean <= 2.5: fund_score += 1; fund_sigs.append(f"Analyst leaning BUY ({rec_mean:.1f}/5)")
             elif rec_mean and rec_mean > 3.5:  fund_score -= 1; fund_sigs.append(f"Analyst consensus SELL ({rec_mean:.1f}/5)")
-            if upside and upside > 0.25: fund_score += 3; fund_sigs.append(f"Analyst target {_price(tgt_price)} implies {_p(upside)} upside")
-            elif upside and upside > 0.12: fund_score += 2; fund_sigs.append(f"Analyst target {_price(tgt_price)} implies {_p(upside)} upside")
-            elif upside and upside > 0.05: fund_score += 1; fund_sigs.append(f"Analyst target {_price(tgt_price)} implies {_p(upside)} upside")
-            elif upside and upside < -0.05: fund_score -= 1; fund_sigs.append(f"Analyst target {_price(tgt_price)} BELOW current — downside risk")
+            _val_pts, _val_sigs = _valuation_score(upside, pe_fwd)
+            fund_score += _val_pts
+            fund_sigs.extend(_val_sigs)
             if peg and 0 < peg < 1.0: fund_score += 2; fund_sigs.append(f"PEG {peg:.2f} < 1 — undervalued vs growth")
             elif peg and 1.0 <= peg < 2.0: fund_score += 1; fund_sigs.append(f"PEG {peg:.2f} — fair value for growth rate")
 

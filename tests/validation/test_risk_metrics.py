@@ -72,17 +72,13 @@ class RiskMetrics(unittest.TestCase):
         dd = (cum - np.maximum.accumulate(cum)) / np.maximum.accumulate(cum) * 100
         self.assertAlmostEqual(self.result["max_drawdown"], float(np.min(dd)), places=6)
 
-    def test_commodity_beta_uses_mixed_ddof(self) -> None:
-        # Reproduce StockX's exact (mixed-ddof) formula and confirm the function
-        # matches it — documenting that the result is cov(ddof=1)/var(ddof=0),
-        # i.e. biased high by n/(n-1) vs a consistent-ddof beta.
+    def test_commodity_beta_uses_consistent_ddof(self) -> None:
+        # Beta must use a consistent ddof: cov(ddof=1) / var(ddof=1). (The prior
+        # cov(ddof=1)/var(ddof=0) biased every beta high by n/(n-1).)
         cr = self.rets["CL=F"].fillna(0).values
-        mixed = float(np.cov(self.port, cr)[0, 1] / np.var(cr))            # as implemented
-        beta_var_ddof1 = float(np.cov(self.port, cr)[0, 1] / np.var(cr, ddof=1))
+        beta = float(np.cov(self.port, cr)[0, 1] / np.var(cr, ddof=1))
         name = _SYMBOL_NAMES.get("CL=F", "CL=F")
-        self.assertAlmostEqual(self.result["commodity_betas"][name], mixed, places=6)
-        n = len(cr)
-        self.assertAlmostEqual(mixed / beta_var_ddof1, n / (n - 1), places=6)
+        self.assertAlmostEqual(self.result["commodity_betas"][name], beta, places=6)
 
     def test_stress_test_is_beta_times_move(self) -> None:
         name = _SYMBOL_NAMES.get("CL=F", "CL=F")

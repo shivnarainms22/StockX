@@ -78,7 +78,7 @@ CHOKEPOINTS: dict[str, dict] = {
     "strait_of_hormuz": {
         "name": "Strait of Hormuz",
         "global_oil_pct": 21,
-        "daily_flow_mbpd": 17.0,
+        "daily_flow_mbpd": 21.0,
         "global_trade_pct": 5,
         "connects": "Persian Gulf to Gulf of Oman / Indian Ocean",
         "primary_commodities": ["CL=F", "BZ=F", "NG=F"],
@@ -621,6 +621,7 @@ def build_knowledge_context(
         "bab_el_mandeb": ["bab-el-mandeb", "bab el mandeb", "red sea", "houthi", "gulf of aden"],
     }
 
+    chokepoint_commodities: set[str] = set()
     for slug, keywords in _CHOKEPOINT_KEYWORDS.items():
         if any(kw in text_lower for kw in keywords):
             cp = CHOKEPOINTS[slug]
@@ -632,6 +633,7 @@ def build_knowledge_context(
                 f"  Key countries: {', '.join(cp['countries_dependent'])}\n"
                 f"  Historical: {cp['historical_disruption']}"
             )
+            chokepoint_commodities.update(cp.get("primary_commodities", []))
 
     # Check commodity keywords for pass-through data
     _COMMODITY_KEYWORDS = {
@@ -650,14 +652,20 @@ def build_knowledge_context(
     for sym, keywords in _COMMODITY_KEYWORDS.items():
         if any(kw in text_lower for kw in keywords):
             matched_symbols.append(sym)
-            pt = INFLATION_PASSTHROUGH.get(sym)
-            if pt:
-                sections.append(
-                    f"INFLATION PASS-THROUGH — {sym}:\n"
-                    f"  {pt['description']}\n"
-                    f"  CPI impact per $1 move: {pt['cpi_impact_per_dollar']}%\n"
-                    f"  Lag: {pt['lag_months']} months"
-                )
+    # Chain: a matched chokepoint pulls in its primary commodities even when the
+    # scenario text never names them (e.g. "Strait of Hormuz" -> oil/gas data).
+    for sym in sorted(chokepoint_commodities):
+        if sym not in matched_symbols:
+            matched_symbols.append(sym)
+    for sym in matched_symbols:
+        pt = INFLATION_PASSTHROUGH.get(sym)
+        if pt:
+            sections.append(
+                f"INFLATION PASS-THROUGH — {sym}:\n"
+                f"  {pt['description']}\n"
+                f"  CPI impact per $1 move: {pt['cpi_impact_per_dollar']}%\n"
+                f"  Lag: {pt['lag_months']} months"
+            )
 
     # Input-output chains
     for sym in matched_symbols:

@@ -1,11 +1,9 @@
 """Validate services.indicators against the `ta` library on deterministic OHLCV.
 
-MACD / Bollinger / Stochastic / EMA / SMA are standard formulas and must match the
-reference tightly. RSI / ATR / ADX use non-Wilder smoothing in StockX (ewm-span /
-SMA instead of Wilder's alpha=1/n), so they deliberately deviate from the canonical
-values — see validation/MACRO_AUDIT_REPORT.md. We do NOT assert the deviating values
-against the reference (that would lock in a likely miscalibration); we only assert
-they stay in valid ranges, and pin the *correct* indicators to the reference.
+All indicators are pinned to the `ta` reference. RSI/ATR/ADX use Wilder smoothing
+(`ewm(alpha=1/period)`) and match `ta` to tight tolerances; MACD/Bollinger/Stochastic/
+EMA/SMA are standard formulas and match exactly (Bollinger within the std ddof
+convention). This is the regression guard for the Wilder-smoothing fix.
 """
 from __future__ import annotations
 import unittest
@@ -69,20 +67,24 @@ class IndicatorsVsReference(unittest.TestCase):
         self.assertAlmostEqual(k, ref, delta=1e-6)
 
     # ── non-Wilder indicators: only assert valid ranges (deviation documented) ─
-    def test_rsi_is_valid_range(self) -> None:
-        # StockX RSI uses ewm-span smoothing (not Wilder); see MACRO_AUDIT_REPORT.
-        # We only range-check it here so switching to Wilder later is NOT blocked
-        # by this test (it would then need its own match-vs-reference assertion).
+    def test_rsi_matches_wilder_reference(self) -> None:
+        # StockX RSI now uses Wilder smoothing (alpha=1/period) -> matches `ta`.
         mine = ind.calc_rsi(self.df)
-        self.assertTrue(0.0 <= mine <= 100.0)
+        ref = ta.momentum.RSIIndicator(self.c, window=14).rsi().iloc[-1]
+        self.assertAlmostEqual(mine, ref, places=4)
 
-    def test_atr_is_positive(self) -> None:
-        self.assertGreater(ind.calc_atr(self.df), 0.0)
+    def test_atr_matches_wilder_reference(self) -> None:
+        mine = ind.calc_atr(self.df)
+        ref = ta.volatility.AverageTrueRange(
+            self.df["High"], self.df["Low"], self.c, window=14).average_true_range().iloc[-1]
+        self.assertAlmostEqual(mine, ref, delta=abs(ref) * 0.02)
 
-    def test_adx_is_valid_range(self) -> None:
+    def test_adx_matches_wilder_reference(self) -> None:
         adx, pdi, mdi = ind.calc_adx(self.df)
+        ref = ta.trend.ADXIndicator(
+            self.df["High"], self.df["Low"], self.c, window=14).adx().iloc[-1]
         self.assertTrue(0.0 <= adx <= 100.0)
-        self.assertTrue(0.0 <= pdi <= 100.0 and 0.0 <= mdi <= 100.0)
+        self.assertAlmostEqual(adx, ref, delta=2.0)
 
 
 if __name__ == "__main__":

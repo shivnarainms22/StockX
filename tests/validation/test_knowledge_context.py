@@ -19,16 +19,13 @@ class KnowledgeContext(unittest.TestCase):
         self.assertIn("Strait of Hormuz", ctx)
         self.assertIn("21%", ctx)                 # global oil share fact
 
-    def test_chokepoint_alone_does_not_chain_to_commodity_data(self) -> None:
-        # DOCUMENTED LIMITATION: injection is keyword-literal. A Hormuz scenario
-        # that never says "oil" gets the chokepoint block but NOT oil pass-through
-        # or EM-vulnerability data, even though the chokepoint IS about oil.
+    def test_chokepoint_chains_to_its_primary_commodities(self) -> None:
+        # A matched chokepoint now injects its primary commodities' data even when
+        # the scenario text never names the commodity: Hormuz -> oil pass-through
+        # and EM-vulnerability (which carries the India/INR oil channel).
         ctx = build_knowledge_context("Iran closes the Strait of Hormuz", 6, None)
-        self.assertNotIn("INFLATION PASS-THROUGH", ctx)
-        # Naming the commodity does pull it in (and EM data carries the INR fact):
-        ctx2 = build_knowledge_context("Strait of Hormuz oil crisis", 6, None)
-        self.assertIn("INFLATION PASS-THROUGH", ctx2)
-        self.assertIn("INR", ctx2)
+        self.assertIn("INFLATION PASS-THROUGH", ctx)
+        self.assertIn("INR", ctx)
 
     def test_wheat_war_scenario_injects_wheat_crisis_and_egypt(self) -> None:
         ctx = build_knowledge_context(

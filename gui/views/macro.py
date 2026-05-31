@@ -2317,7 +2317,7 @@ def _compute_risk_metrics(portfolio: list[dict]) -> dict:
             continue
         cr = returns[csym].fillna(0).values
         cov_val = np.cov(port_returns, cr)[0, 1]
-        var_val = np.var(cr)
+        var_val = np.var(cr, ddof=1)  # match cov's ddof=1 for an unbiased beta
         if var_val > 1e-10:
             betas[_SYMBOL_NAMES.get(csym, csym)] = float(cov_val / var_val)
     result["commodity_betas"] = betas

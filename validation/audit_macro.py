@@ -167,11 +167,13 @@ def audit_knowledge(audit: Audit) -> None:
         missing = [e for e in expected if e.lower() not in ctx.lower()]
         audit.add("knowledge", scenario[:38], "PASS" if not missing else "FLAG",
                   f"len={len(ctx)} chars" + (f"; missing {missing}" if missing else ""))
-    # Document the keyword-literal limitation explicitly.
+    # A chokepoint scenario should chain to its commodities even without the word.
     bare = build_knowledge_context("Iran closes the Strait of Hormuz", 6, None)
-    audit.add("knowledge", "chokepoint->commodity chaining", "FLAG"
-              if "INFLATION PASS-THROUGH" not in bare else "PASS",
-              "Hormuz w/o the word 'oil' injects chokepoint but NOT oil pass-through")
+    chained = "INFLATION PASS-THROUGH" in bare
+    audit.add("knowledge", "chokepoint->commodity chaining",
+              "PASS" if chained else "FLAG",
+              "Hormuz (no 'oil') chains to oil pass-through" if chained
+              else "Hormuz w/o 'oil' injects chokepoint but NOT oil pass-through")
 
 
 # ── E. LLM geopolitical scenario engine ──────────────────────────────────────
