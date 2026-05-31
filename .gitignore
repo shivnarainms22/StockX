@@ -42,3 +42,6 @@ AGENTS.md
 # Docs / plans / specs (local only)
 .superpowers/
 docs/superpowers/
+
+# audit run artifact (regenerable via validation/audit.py)
+validation/audit_findings.json
