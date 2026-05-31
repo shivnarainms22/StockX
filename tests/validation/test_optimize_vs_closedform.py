@@ -14,7 +14,7 @@ import unittest
 try:
     import numpy as np
     import pandas as pd
-    from services.optimize import optimize_portfolio
+    from services.optimize import optimize_portfolio, shrunk_covariance
 except ModuleNotFoundError:  # pragma: no cover
     np = None
 
@@ -34,7 +34,9 @@ class OptimizeVsClosedForm(unittest.TestCase):
         draws = rng.multivariate_normal(means, cov_d, size=n_days)
         cls.returns_df = pd.DataFrame(draws, columns=["A", "B", "C"])
         cls.mu = cls.returns_df.mean().to_numpy() * 252
-        cls.cov = cls.returns_df.cov().to_numpy() * 252
+        # The optimizer uses the Ledoit-Wolf shrunk covariance, so the closed-form
+        # oracle must use the same Sigma to validate the solver (not the estimator).
+        cls.cov = shrunk_covariance(cls.returns_df) * 252
         inv = np.linalg.inv(cls.cov)
         ones = np.ones(3)
         cls.w_minvar = inv @ ones / (ones @ inv @ ones)
