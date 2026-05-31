@@ -9,6 +9,7 @@ import time
 from typing import Callable
 
 from gui.state import AppState
+from services.indicators import calc_rsi
 from services.notifications import notify
 
 
@@ -81,11 +82,7 @@ async def run_monitor(state: AppState, show_alert: Callable[[str, str], None]) -
                 if hist.empty:
                     continue
                 price = float(hist["Close"].iloc[-1])
-                # Compute RSI-14
-                delta  = hist["Close"].diff()
-                gains  = delta.clip(lower=0).rolling(14).mean()
-                losses = (-delta.clip(upper=0)).rolling(14).mean()
-                rsi    = float((100 - 100 / (1 + gains / losses)).iloc[-1])
+                rsi    = calc_rsi(hist)  # Wilder-smoothed, shared with analysis/macro
                 history_ready = len(hist) >= _MIN_HISTORY_ROWS
                 base_confidence = 0.55 if history_ready else 0.45
                 min_confidence = float(item.get("min_confidence", state.default_alert_confidence))

@@ -20,6 +20,7 @@ from gui.theme import (
     ACCENT, ACCENT_CYAN, ACCENT_HOVER, APP_BG, BORDER_CARD, BORDER_INPUT, BORDER_SUBTLE,
     NEGATIVE, POSITIVE, SURFACE_1, SURFACE_2, SURFACE_3, TEXT_1, TEXT_2, TEXT_MUTED, fmt_price,
 )
+from services.indicators import calc_rsi
 
 if TYPE_CHECKING:
     from gui.app import MainWindow
@@ -486,10 +487,7 @@ class WatchlistView(QWidget):
                         self._live[ticker] = {"error": True}
                         continue
                     price  = float(hist["Close"].iloc[-1])
-                    delta  = hist["Close"].diff()
-                    gains  = delta.clip(lower=0).rolling(14).mean()
-                    losses = (-delta.clip(upper=0)).rolling(14).mean()
-                    rsi    = float((100 - 100 / (1 + gains / losses)).iloc[-1])
+                    rsi    = calc_rsi(hist)  # Wilder-smoothed, shared with analysis/macro
 
                     # 1-day change %
                     prev = float(hist["Close"].iloc[-2]) if len(hist) >= 2 else price

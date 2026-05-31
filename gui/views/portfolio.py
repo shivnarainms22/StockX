@@ -27,6 +27,42 @@ if TYPE_CHECKING:
     from gui.app import MainWindow
 
 
+def aggregate_by_currency(
+    portfolio: list[dict],
+    prices: dict[str, float],
+    currencies: dict[str, str],
+) -> dict[str, tuple[float, float]]:
+    """Sum (market_value, cost_basis) per currency. Pure and testable.
+
+    Holdings in different currencies are kept separate (never cross-summed).
+    Falls back to avg_cost when a live price is missing (that holding shows flat).
+    """
+    by_currency: dict[str, tuple[float, float]] = {}
+    for h in portfolio:
+        t = h["ticker"]
+        price = prices.get(t, h["avg_cost"])
+        code = currencies.get(t, "USD")
+        val = price * h["qty"]
+        cost = h["avg_cost"] * h["qty"]
+        pv, pc = by_currency.get(code, (0.0, 0.0))
+        by_currency[code] = (pv + val, pc + cost)
+    return by_currency
+
+
+def ttm_dividend(divs) -> float:
+    """Trailing-twelve-month dividend per share from a yfinance dividends Series.
+
+    Handles both tz-aware and tz-naive indices: a tz-naive cutoff compared against
+    yfinance's tz-aware index raised TypeError, which the callers swallowed —
+    silently zeroing all dividend income.
+    """
+    import pandas as pd
+    if divs is None or len(divs) == 0:
+        return 0.0
+    cutoff = pd.Timestamp.now(tz=divs.index.tz) - pd.DateOffset(years=1)
+    return float(divs[divs.index >= cutoff].sum())
+
+
 class PortfolioView(QWidget):
     def __init__(self, state: AppState, main_window: "MainWindow", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -229,15 +265,8 @@ class PortfolioView(QWidget):
     # ── Data updates ──────────────────────────────────────────────────────
 
     def _update_summary(self) -> None:
-        by_currency: dict[str, tuple[float, float]] = {}
-        for h in self._state.portfolio:
-            t     = h["ticker"]
-            price = self._prices.get(t, h["avg_cost"])
-            code  = self._currencies.get(t, "USD")
-            val   = price * h["qty"]
-            cost  = h["avg_cost"] * h["qty"]
-            prev_val, prev_cost = by_currency.get(code, (0.0, 0.0))
-            by_currency[code] = (prev_val + val, prev_cost + cost)
+        by_currency = aggregate_by_currency(
+            self._state.portfolio, self._prices, self._currencies)
 
         if not by_currency:
             self._total_value_txt.setText("—")
@@ -438,10 +467,7 @@ class PortfolioView(QWidget):
             try:
                 def _fetch_div(t: str) -> float:
                     import yfinance as yf
-                    import pandas as pd
-                    divs = yf.Ticker(t).dividends
-                    cutoff = pd.Timestamp.now() - pd.DateOffset(years=1)
-                    return float(divs[divs.index >= cutoff].sum())
+                    return ttm_dividend(yf.Ticker(t).dividends)
                 ttm = await asyncio.get_event_loop().run_in_executor(
                     None, lambda t=ticker: _fetch_div(t)
                 )
@@ -499,10 +525,7 @@ class PortfolioView(QWidget):
             try:
                 def _fetch_div(t: str) -> float:
                     import yfinance as yf
-                    import pandas as pd
-                    divs = yf.Ticker(t).dividends
-                    cutoff = pd.Timestamp.now() - pd.DateOffset(years=1)
-                    return float(divs[divs.index >= cutoff].sum())
+                    return ttm_dividend(yf.Ticker(t).dividends)
 
                 ttm = await asyncio.get_event_loop().run_in_executor(
                     None, lambda t=ticker: _fetch_div(t)
